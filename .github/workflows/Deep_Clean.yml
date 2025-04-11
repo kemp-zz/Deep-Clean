@@ -116,10 +116,10 @@ jobs:
 
 
 
-         - name: Enhanced Storage Report
-           run: |
-             # 生成 JSON 报告（增加 --quiet 减少输出干扰）
-             sudo ncdu -x --quiet -o storage.json /
+      - name: Enhanced Storage Report
+        run: |
+         
+          sudo ncdu -x --quiet -o storage.json /
     
              # 格式化解析并过滤错误
              echo "▂▂▂▂▂▂▂▂ 详细分析 ▂▂▂▂▂▂▂▂"
