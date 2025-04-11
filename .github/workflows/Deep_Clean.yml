@@ -60,18 +60,19 @@ jobs:
       - name: APT Nuclear Cleanup
         run: |
           echo "▂▂▂▂▂▂▂▂ APT 原子级清理 ▂▂▂▂▂▂▂▂"
-          # 强制卸载指定软件包（增强依赖处理）[4](@ref)
-          sudo dpkg -P google-cloud-sdk azure-cli \
-            postgresql-12 openjdk-11-jdk \
-            --force-depends
-          
-          # 清理残留配置文件（正则过滤）[4](@ref)
-          sudo apt purge -y $(dpkg -l | awk '/^rc/{print $2}' | grep -vE '^(lib|fonts)')
-          
-          # 内核头文件清理（动态版本匹配）[4](@ref)
+          # 安全卸载核心组件（参数顺序修复）
+          sudo dpkg --force-depends -P \
+            google-cloud-sdk \
+            azure-cli \
+            postgresql-12 \
+            openjdk-11-jdk
+    
+          # 清理残留配置文件（正则过滤关键库）
+          sudo apt purge -y $(dpkg -l | awk '/^rc/{print $2}' | grep -vE '^(lib|fonts|linux)')
+    
+          # 动态内核头文件清理（精确版本匹配）
           current_kernel=$(uname -r | sed 's/-generic//')
-          sudo dpkg -l 'linux-headers-*' | awk '/^ii/{print $2}' | \
-            grep -v $current_kernel | xargs sudo apt purge -y
+          sudo apt purge -y $(dpkg -l 'linux-headers-*' | awk '/^ii/{print $2}' | grep -v $current_kernel)
 
       - name: Enhanced Storage Report
         continue-on-error: true  # 允许报告步骤失败不影响整体流程[5](@ref)
