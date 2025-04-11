@@ -1,6 +1,3 @@
-name: Deep Clean
-on: workflow_dispatch
-
 jobs:
   storage-cleanup:
     runs-on: ubuntu-latest
@@ -30,7 +27,6 @@ jobs:
               echo "::warning::路径不存在: $path"
             fi
           done
-
           echo "▂▂▂▂▂▂▂▂ 初始空间 ▂▂▂▂▂▂▂▂"
           df -h /
 
@@ -39,49 +35,54 @@ jobs:
           set -eo pipefail
           echo "▂▂▂▂▂▂▂▂ 执行清理 ▂▂▂▂▂▂▂▂"
     
-          # 暴力级APT清理[4,6](@ref)
+          # 智能APT清理
           pkgs_to_purge=(
             "azure-cli" "google-cloud-cli" 
             "temurin-*-jdk" "llvm-*-dev"
-            "python3*" "pip*" "nodejs*"  # 新增Python相关包
+            "python3*" "pip*" "nodejs*"
           )
     
-          for pkg in "${pkgs_to_purge[@]}"; do
-            if dpkg-query -W "$pkg" >/dev/null 2>&1; then
-              sudo apt-get autopurge -y "$pkg"  # 使用autopurge彻底删除[4](@ref)
-            fi
+          echo "→ 智能识别已安装的APT包..."
+          for pkg_pattern in "${pkgs_to_purge[@]}"; do
+            regex_pattern=$(sed 's/*/.*/g' <<< "$pkg_pattern")
+            installed_pkgs=$(apt list --installed 2>/dev/null | awk -F/ '{print $1}' | grep -E "^${regex_pattern}$")
+            
+            [ -z "$installed_pkgs" ] && continue  # 无安装包则跳过
+            
+            for pkg in $installed_pkgs; do
+              echo "正在卸载: $pkg"
+              sudo apt-get autopurge -y "$pkg" 2>&1 | grep -vE "未安装|not installed"
+            done
           done
           
-          # 增强型系统清理[2,6](@ref)
-          sudo apt-get autoremove --purge -y
+          # 系统级清理
+          sudo apt-get autoremove --purge -y || true
+          sudo apt-get -f install || true
           sudo apt-get autoclean
           sudo rm -rf /var/lib/apt/lists/*
           sudo rm -rf /var/cache/apt/archives/*
-          sudo rm -rf /usr/share/doc/* /usr/share/man/*  # 文档清理
+          sudo rm -rf /usr/share/doc/* /usr/share/man/*
 
-          # 彻底删除Python生态[9,11](@ref)
+          # Python生态清除
           echo "→ 完全清除Python环境..."
           sudo rm -rf /opt/hostedtoolcache/Python
           sudo rm -rf /usr/local/lib/python*
-          sudo rm -rf ~/.cache/pip /root/.cache/pip  # 双用户缓存清理
+          sudo rm -rf ~/.cache/pip /root/.cache/pip
           sudo find /usr/lib /usr/local/lib -name "python*" -type d -exec rm -rf {} + 2>/dev/null
 
-          # 扩展开发工具链清理[7](@ref)
+          # 开发工具链清理
           echo "→ 清理SDK工具链..."
           sudo rm -rf \
-            /usr/local/lib/android \    # Android SDK
-            /usr/local/.ghcup \         # Haskell工具链
-            /opt/hostedtoolcache/CodeQL # CodeQL分析工具
+            /usr/local/lib/android \
+            /usr/local/.ghcup \
+            /opt/hostedtoolcache/CodeQL
           
           sudo find /usr/lib -type d $ \
-            -name "azure*" -o -name "google*" \
-            -o -name "jdk*" -o -name "llvm*" $ \
-            -exec rm -rf {} +
-
-          # 进程级空间释放[3](@ref)
-          echo "→ 释放被占用的空间..."
-          sudo lsof / | grep deleted | awk '{print $2}' | xargs -r kill -9
-          sudo sync && echo 3 | sudo tee /proc/sys/vm/drop_caches
+            -name "azure*" -o \
+            -name "google*" -o \
+            -name "jdk*" -o \
+            -name "llvm*" $ \
+            -exec rm -rf {} + 2>/dev/null
 
       - name: 清理验证
         run: |
@@ -100,13 +101,3 @@ jobs:
               echo "✅ 清理成功: $target"
             fi
           done
-
-          echo "▂▂▂▂▂▂▂▂ 存储详情 ▂▂▂▂▂▂▂▂"
-          sudo du -d 3 -h /usr /opt /var 2>/dev/null | sort -hr | awk '
-            $2 ~ /(python|pip|jdk|android|ghcup)/ {
-              printf "\033[31m%-50s ➔ %8s\033[0m\n", $2, $1
-              next
-            }
-            NR<=15 {
-              printf "%-50s ➔ \033[32m%8s\033[0m\n", $2, $1
-            }'
