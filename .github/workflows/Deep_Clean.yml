@@ -81,23 +81,18 @@ jobs:
 
       - name: Third-party Toolchain Purge
         run: |
-          echo "▂▂▂▂▂▂▂▂ 第三方工具链清理 ▂▂▂▂▂▂▂▂"
-          # 修复      后的find命令
+          # 修复后的find命令（注意转义和逻辑组合）
           sudo find /opt/hostedtoolcache -maxdepth 2 -type $ \
             -name "1.2*" -o \
             -name "node_modules" -o \
             -name "__pycache__" \
           $ -mtime +30 -exec rm -rf {} + 2>/dev/null
-            
-          # 智能卸载 Node.js 全局模块（安全模式）
+    
+          # 增强版Node.js模块清理
           npm list -g --depth=0 --parseable | 
           awk -F/ '{print $NF}' | 
           grep -vE '^(npm|corepack)$' | 
-          xargs -r sudo npm uninstall -g --no-audit
-
-          # 靶向清理 Python 虚拟环境（防止误删系统目录）
-          find /home /opt /usr/local -name ".venv" -type d -exec sudo rm -rf {} +
-          find /tmp -name "venv" -type d -mtime +7 -exec rm -rf {} +
+          xargs -r sudo npm uninstall -g --no-audit 2>/dev/null
 
       - name: PIP Ecosystem Sanitization
         run: |
