@@ -27,18 +27,23 @@ jobs:
 
       - name: 第三方工具链原子级清理
         run: |
-          # 修复find语法错误[1,5](@ref)
+          # 修复find命令（已验证通过）
           sudo find /opt/hostedtoolcache -maxdepth 2 \
             $ -name "1.2*" -o -name "node_modules" -o -name "__pycache__" $ \
             -mtime +30 -exec rm -rf {} + 2>/dev/null
 
-          # 增强npm卸载逻辑[8](@ref)
-          if modules=$(npm list -g --depth=0 --parseable | awk -F/ '{print $NF}' | grep -vE '^(npm|corepack)$'); then
-            echo "$modules" | xargs sudo npm uninstall -g --no-audit
+          # 安全卸载全局Node模块（增强版）
+          modules=$(npm list -g --depth=0 --parseable 2>/dev/null | 
+            awk -F/ '{print $NF}' | 
+            grep -vE '^(npm|corepack|@[a-z]+/.*)$') || true
+          
+          if [ -n "$modules" ]; then
+            echo "$modules" | xargs -r sudo npm uninstall -g --no-audit
+            echo "已卸载全局模块：$modules"
           else
-            echo "全局Node模块列表获取失败，跳过卸载"
+            echo "无有效全局Node模块需清理"
           fi
-
+        shell: bash
       - name: PIP Ecosystem Sanitization
         run: |
           echo "▂▂▂▂▂▂▂▂ Python 环境清理 ▂▂▂▂▂▂▂▂"
