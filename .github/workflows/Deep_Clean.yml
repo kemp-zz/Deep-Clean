@@ -1,7 +1,5 @@
 name: Deep Clean
-on:
-  workflow_dispatch:
-
+on: workflow_dispatch
 
 jobs:
   storage-cleanup:
@@ -18,7 +16,7 @@ jobs:
           echo "▂▂▂▂▂▂▂▂ 存储诊断 ▂▂▂▂▂▂▂▂"
           
           declare -a check_paths=(
-            "/usr/lib/python3.*/dist-packages"
+            "/usr/lib/python3/dist-packages"
             "/usr/local/share/boost"
             "/opt/hostedtoolcache/Python"
             "/var/lib/apt/lists"
@@ -55,12 +53,12 @@ jobs:
           done
           sudo apt-get autoremove -y
           sudo apt-get clean
+          sudo rm -rf /var/cache/apt/archives/*
     
-          # Python版本控制
-          echo "→ 保留Python 3.10.16..."
-          if [ -d "/opt/hostedtoolcache/Python/3.10.16" ]; then
-            sudo find /opt/hostedtoolcache/Python -maxdepth 1 \
-              -type d ! -name "3.10.16" -exec rm -rf {} +
+          # 完全删除所有Python版本
+          echo "→ 删除全部Python版本..."
+          if [ -d "/opt/hostedtoolcache/Python" ]; then
+            sudo rm -rf /opt/hostedtoolcache/Python
           fi
     
           # SDK清理（修复语法）
