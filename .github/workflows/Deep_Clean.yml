@@ -1,87 +1,56 @@
 name: Deep Clean
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 jobs:
   storage-cleanup:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
     permissions:
       contents: read
       actions: write
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Pre-Cleanup Checks
+      - name: 预清理验证
         run: |
-          # 验证 sudo 权限和路径存在性 [1](@ref)
-          if ! sudo -n true 2>/dev/null; then
-            echo "错误：工作流未配置sudo权限" >&2
-            exit 1
-          fi
-          sudo du -sh /usr/local/lib/android/sdk 2>/dev/null || true
-          sudo du -sh /var/lib/gems /usr/share/miniconda /usr/lib/google-cloud-sdk 2>/dev/null
-
-      - name: 多路径强制清理
-        run: |
-          # 清理系统级 SDK [4,5](@ref)
-          if [ -d "/usr/local/lib/android/sdk" ]; then
-            echo "▂▂▂▂▂▂▂▂ 强制清理系统级 SDK ▂▂▂▂▂▂▂▂"
-            sudo rm -rf /usr/local/lib/android/sdk
-            sudo sed -i '/ANDROID_HOME/d' /etc/environment
-          fi
-
-          # 清理其他指定目录 [1,5](@ref)
-          targets=(
+          # 验证sudo权限
+          sudo -n true || (echo "缺少sudo权限" >&2; exit 1)
+          
+          # 目标目录容量预检
+          declare -a targets=(
+            "/home/runneradmin/.rustup"
+            "/home/linuxbrew/.linuxbrew"
+            "/opt/pipx"
+            "/opt/hostedtoolcache"
             "/var/lib/gems"
-            "/usr/share/miniconda"
-            "/usr/lib/google-cloud-sdk"
           )
           for dir in "${targets[@]}"; do
-            if [ -d "$dir" ]; then
-              echo "正在清理 $dir ..."
-              sudo rm -rf "$dir"
-            fi
+            [ -d "$dir" ] && sudo du -sh "$dir" || echo "$dir 不存在"
           done
 
-      - name: 安装新版 SDK
+      - name: 多级缓存清理
         run: |
-          # 沙盒化安装 SDK [4,11](@ref)
-          mkdir -p ~/android-sdk/cmdline-tools
-          wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
-          unzip -q commandlinetools-linux-*.zip -d ~/android-sdk/cmdline-tools
-          mv ~/android-sdk/cmdline-tools/cmdline-tools ~/android-sdk/cmdline-tools/latest
-          echo "ANDROID_HOME=$HOME/android-sdk" >> $GITHUB_ENV
-          echo "PATH=$HOME/android-sdk/cmdline-tools/latest/bin:$PATH" >> $GITHUB_ENV
+          # 原子级删除操作
+          sudo rm -rf \
+            /home/runneradmin/.rustup/settings.toml \
+            /home/linuxbrew/.linuxbrew/share/zsh \
+            /opt/pipx/venvs/ansible-core \
+            /opt/hostedtoolcache/node/18.*/x64/lib/node_modules/npm-bundled \
+            /var/lib/gems/3.2.0/gems/fastlane-2.227.0
 
-      - name: 接受 Android 许可证
-        run: |
-          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses
+          # 保留最近3个Node版本
+          ls /opt/hostedtoolcache/node | sort -V | head -n -3 | xargs -I{} sudo rm -rf /opt/hostedtoolcache/node/{}
 
-      - name: SDK 组件智能清理
-        run: |
-          # 批量清理未安装组件 [5,7](@ref)
-          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --list --channel=0 | 
-            awk '/ndk;.*not installed/{gsub(/"/,"",$1); print $1}' | 
-            xargs -r $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --uninstall
-
-          # 清理历史版本 [4](@ref)
-          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --uninstall "cmake;*" --include_obsolete
-
-      - name: 存储健康报告
+      - name: 修复存储报告
         continue-on-error: true
         run: |
-          # 修复 JSON 解析错误 [9](@ref)
-          sudo apt-get install -y ncdu jq
-          sudo ncdu -x -o storage.json /
+          # 安装轻量级分析工具
+          sudo apt-get install -y jq
           
-          echo "▂▂▂▂▂▂▂▂ 存储占用 TOP5 ▂▂▂▂▂▂▂▂"
-          jq -r '[.disk_usage.directories[] | 
-            select(.name != "/") | 
-            {path: .name, size: (.total_size/(1024 * 1024)|floor)}] | 
-            sort_by(-.size) | .[0:5] | 
-            .[] | "\(.path) ➔ \(.size)MB"' storage.json
+          # 生成存储报告（修复JSON结构）
+          sudo du -d 1 -h / 2>/dev/null | sort -hr | awk '
+            BEGIN {print "存储路径\t占用空间"}
+            NR<=10 {
+              gsub(/\/$/, "", $2); 
+              printf "%-45s ➔ \033[36m%8s\033[0m\n", $2, $1
+            }'
