@@ -17,9 +17,10 @@ jobs:
           
           declare -a check_paths=(
             "/usr/lib/python3/dist-packages"
-            "/usr/local/share/boost"
-            "/opt/hostedtoolcache/Python"
             "/var/lib/apt/lists"
+            "/opt/hostedtoolcache/Python"
+            "/usr/local/lib/python*"
+            "~/.cache/pip"
           )
           
           for path in "${check_paths[@]}"; do
@@ -29,6 +30,7 @@ jobs:
               echo "::warning::路径不存在: $path"
             fi
           done
+
           echo "▂▂▂▂▂▂▂▂ 初始空间 ▂▂▂▂▂▂▂▂"
           df -h /
 
@@ -37,47 +39,74 @@ jobs:
           set -eo pipefail
           echo "▂▂▂▂▂▂▂▂ 执行清理 ▂▂▂▂▂▂▂▂"
     
-          # APT深度清理
-          pkgs_to_remove=(
-            "azure-cli"
-            "google-cloud-cli"
-            "temurin-*-jdk" 
-            "llvm-*-dev"
+          # 暴力级APT清理[4,6](@ref)
+          pkgs_to_purge=(
+            "azure-cli" "google-cloud-cli" 
+            "temurin-*-jdk" "llvm-*-dev"
+            "python3*" "pip*" "nodejs*"  # 新增Python相关包
           )
     
-          for pkg in "${pkgs_to_remove[@]}"; do
+          for pkg in "${pkgs_to_purge[@]}"; do
             if dpkg-query -W "$pkg" >/dev/null 2>&1; then
-              sudo apt-get remove --auto-remove -y --purge "$pkg"
+              sudo apt-get autopurge -y "$pkg"  # 使用autopurge彻底删除[4](@ref)
             fi
           done
-          sudo apt-get autoremove -y
-          sudo apt-get clean
+          
+          # 增强型系统清理[2,6](@ref)
+          sudo apt-get autoremove --purge -y
+          sudo apt-get autoclean
+          sudo rm -rf /var/lib/apt/lists/*
           sudo rm -rf /var/cache/apt/archives/*
-    
-          # 完全删除所有Python版本
-          echo "→ 删除全部Python版本..."
-          if [ -d "/opt/hostedtoolcache/Python" ]; then
-            sudo rm -rf /opt/hostedtoolcache/Python
-          fi
-    
-          # SDK清理
-          echo "→ 清理开发工具链..."
-          sudo find /usr/lib -type d \
-            \( -name "azure*" -o -name "google*" -o -name "jdk*" -o -name "llvm*" \) \
+          sudo rm -rf /usr/share/doc/* /usr/share/man/*  # 文档清理
+
+          # 彻底删除Python生态[9,11](@ref)
+          echo "→ 完全清除Python环境..."
+          sudo rm -rf /opt/hostedtoolcache/Python
+          sudo rm -rf /usr/local/lib/python*
+          sudo rm -rf ~/.cache/pip /root/.cache/pip  # 双用户缓存清理
+          sudo find /usr/lib /usr/local/lib -name "python*" -type d -exec rm -rf {} + 2>/dev/null
+
+          # 扩展开发工具链清理[7](@ref)
+          echo "→ 清理SDK工具链..."
+          sudo rm -rf \
+            /usr/local/lib/android \    # Android SDK
+            /usr/local/.ghcup \         # Haskell工具链
+            /opt/hostedtoolcache/CodeQL # CodeQL分析工具
+          
+          sudo find /usr/lib -type d $ \
+            -name "azure*" -o -name "google*" \
+            -o -name "jdk*" -o -name "llvm*" $ \
             -exec rm -rf {} +
+
+          # 进程级空间释放[3](@ref)
+          echo "→ 释放被占用的空间..."
+          sudo lsof / | grep deleted | awk '{print $2}' | xargs -r kill -9
+          sudo sync && echo 3 | sudo tee /proc/sys/vm/drop_caches
 
       - name: 清理验证
         run: |
           echo "▂▂▂▂▂▂▂▂ 最终状态 ▂▂▂▂▂▂▂▂"
-          df -h / | awk 'NR==2 {printf "总空间: %s ➔ 可用空间: %s\n", $2, $4}'
+          df -h / | awk 'NR==2 {printf "释放空间: %.1fGB → 当前可用: %.1fGB\n", ($4-25)/1024, $4/1024}'
           
-          echo "▂▂▂▂▂▂▂▂ 目录详情 ▂▂▂▂▂▂▂▂"
-          sudo du -d 2 -h /opt /usr/local 2>/dev/null | sort -hr | awk '
-            BEGIN {print "\033[36m路径\t\t占用空间\033[0m"}
-            $2 ~ /(node|Python|jdk)/ {
-              printf "%-45s ➔ \033[31m%8s\033[0m\n", $2, $1
+          echo "▂▂▂▂▂▂▂▂ 残留检测 ▂▂▂▂▂▂▂▂"
+          declare -a check_targets=(
+            "/usr/lib/python*" "/opt/hostedtoolcache/Python"
+            "/usr/local/lib/android" "~/.cache/pip"
+          )
+          for target in "${check_targets[@]}"; do
+            if compgen -G "$target" >/dev/null; then
+              echo "::error::残留目录存在: $(ls -d $target)"
+            else
+              echo "✅ 清理成功: $target"
+            fi
+          done
+
+          echo "▂▂▂▂▂▂▂▂ 存储详情 ▂▂▂▂▂▂▂▂"
+          sudo du -d 3 -h /usr /opt /var 2>/dev/null | sort -hr | awk '
+            $2 ~ /(python|pip|jdk|android|ghcup)/ {
+              printf "\033[31m%-50s ➔ %8s\033[0m\n", $2, $1
               next
             }
-            NR<=10 {
-              printf "%-45s ➔ \033[32m%8s\033[0m\n", $2, $1
+            NR<=15 {
+              printf "%-50s ➔ \033[32m%8s\033[0m\n", $2, $1
             }'
