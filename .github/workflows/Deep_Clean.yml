@@ -19,10 +19,11 @@ jobs:
       - name: Prepare Environment
         run: |
           sudo apt-get update
-          sudo apt-get install -y ncdu jq  # 新增 JSON 解析工具[3](@ref)
+          sudo apt-get install -y ncdu jq
 
       - name: Rotate system logs
         run: |
+          sudo journalctl --rotate
           sudo journalctl --vacuum-time=7d
           sudo find /var/log -name "*.gz" -mtime +14 -exec rm -f {} \;
           echo "剩余日志空间: $(df -h /var/log | awk 'NR==2{print $4}')"
@@ -54,22 +55,15 @@ jobs:
           sudo find /tmp -type f -mtime +7 -exec rm -f {} \;
           sudo find /var/tmp -name "*.un~" -delete
 
-
-      
       - name: Android SDK 智能清理
         continue-on-error: true
         run: |
-          # 动态检测已安装包
           installed_packages=$(/usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager --list_installed)
-
-          # 正则严格匹配目标包
           target_packages=(
             "^build-tools;34\.0\.0$"
             "^platforms;android-33$"
             "^system-images;android-30;google_apis;x86_64$"
           )
-
-          # 精确卸载存在的包
           for pkg in "${target_packages[@]}"; do
             if echo "$installed_packages" | grep -Pq "$pkg"; then
               echo "正在卸载：$pkg"
@@ -81,83 +75,45 @@ jobs:
 
       - name: 第三方工具链原子级清理
         run: |
-          # 修复后的 find 命令
           sudo find /opt/hostedtoolcache -maxdepth 2 \
-            \( -name "1.2*" -o -name "node_modules" -o -name "__pycache__" \) \
+            $ -name "1.2*" -o -name "node_modules" -o -name "__pycache__" $ \
             -mtime +30 -exec rm -rf {} + 2>/dev/null
-
-          # 安全版 Node 模块卸载
           modules=$(npm list -g --depth=0 --parseable | awk -F/ '{print $NF}' | grep -vE '^(npm|corepack)$')
-          if [[ -n "$modules" ]]; then
-            echo "$modules" | xargs sudo npm uninstall -g --no-audit 2>/dev/null
-          fi
-
+          [[ -n "$modules" ]] && echo "$modules" | xargs sudo npm uninstall -g --no-audit 2>/dev/null
 
       - name: PIP Ecosystem Sanitization
         run: |
           echo "▂▂▂▂▂▂▂▂ Python 环境清理 ▂▂▂▂▂▂▂▂"
-          # 安全卸载用户级包（保留系统级依赖）[7](@ref)
           pip list --user --format=freeze | 
           grep -vE '^(pip|setuptools|wheel)==' | 
           cut -d= -f1 | 
           xargs -r pip uninstall -y
 
-          # 分层清理缓存（兼容多版本环境）[6,7](@ref)
-          pip cache purge 2>/dev/null || true
-          rm -rf ~/.cache/pip ~/.pyenv/versions/* 
-          find /usr/local -name "*.pyc" -delete
+          # 权限修复点：使用sudo清理系统级缓存
+          sudo pip cache purge 2>/dev/null || true
+          sudo rm -rf ~/.cache/pip ~/.pyenv/versions/* 
+          
+          # 精确路径匹配（修复原始错误）
+          sudo find /usr/local -path "*/__pycache__" -type d -exec rm -rf {} +
+          sudo find /usr/local -name "*.pyc" -mtime +7 -delete
 
-          # 精准清理编译残留（限定作用域）
-          find /home /opt /usr/local -type d $ 
-            -name "__pycache__" -o 
-            -name "*.egg-info" 
-          $ -exec sudo rm -rf {} +
       - name: APT Nuclear Cleanup
         run: |
           echo "▂▂▂▂▂▂▂▂ APT 原子级清理 ▂▂▂▂▂▂▂▂"
-          # 彻底移除指定软件包[3,10](@ref)
           sudo dpkg -P google-cloud-sdk azure-cli \
             postgresql-12 openjdk-11-jdk \
             --force-depends
-          
-          # 清除配置文件残留
           sudo apt purge -y $(dpkg -l | grep '^rc' | awk '{print $2}')
-          
-          # 删除旧内核头文件（增强版）
           sudo dpkg -l 'linux-headers-*' | awk '/^ii/{print $2}' | \
             grep -v $(uname -r | sed 's/-generic//') | xargs sudo apt purge -y
 
-
-
       - name: Enhanced Storage Report
         run: |
-         
-          sudo ncdu -x --quiet -o storage.json /
-    
-             # 格式化解析并过滤错误
-             echo "▂▂▂▂▂▂▂▂ 详细分析 ▂▂▂▂▂▂▂▂"
-             jq -r '
-               if type == "array" then
-                 sort_by(.total_size) | reverse | .[0:5] | 
-                 map({path: .name, size: (.total_size / (1024 * 1024) | floor)})
-               else
-                 "错误：JSON 格式不符合预期"
-               end
-             ' storage.json
-
-          # 目录级深度分析（TOP10）[6](@ref)
           echo "▂▂▂▂▂▂▂▂ 最大目录 TOP10 ▂▂▂▂▂▂▂▂"
           sudo du -h --max-depth=2 / 2>/dev/null | sort -hr | head -10 | awk '
             BEGIN { print "路径                                   ➔ 占用空间" }
             { printf "%-40s ➔ \033[36m%8s\033[0m\n", $2, $1 }'
-
-          # 生成 ncdu JSON 报告[3,5](@ref)
+          
           sudo ncdu -x -o storage.json /
           echo "▂▂▂▂▂▂▂▂ 详细分析 ▂▂▂▂▂▂▂▂"
           jq '[.directories[] | {path: .name, size: (.total_size / (1024 * 1024) | floor)}] | sort_by(-.size) | .[0:5]' storage.json
-
-          # 潜在可释放空间预测[1](@ref)
-          echo "▂▂▂▂▂▂▂▂ 空间优化建议 ▂▂▂▂▂▂▂▂"
-          docker_size=$(docker system df --format '{{.Size}}' | awk '/GB/ {sum+=$1} END {print sum"GB"}')
-          journal_size=$(journalctl --disk-usage | awk '{print $7}')
-          echo "潜在可释放空间: Docker(${docker_size}) + 日志(${journal_size}MB)"
