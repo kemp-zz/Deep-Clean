@@ -41,48 +41,35 @@ jobs:
         run: |
           set -x
           echo "▂▂▂▂▂▂▂▂ 执行清理 ▂▂▂▂▂▂▂▂"
-          
-          # APT专项清理（网页6）
+    
+          # APT深度清理
           pkgs_to_remove=(
             "azure-cli"
             "google-cloud-cli"
-            "temurin-*-jdk"
+            "temurin-*-jdk" 
             "llvm-*-dev"
-            "microsoft-edge-stable"
           )
-          
+    
           for pkg in "${pkgs_to_remove[@]}"; do
             if dpkg-query -W "$pkg" >/dev/null 2>&1; then
-              echo "→ 删除 $pkg..."
-              sudo apt-get remove -y --auto-remove --purge "$pkg"
-            else
-              echo "::warning::未找到包: $pkg"
+              sudo apt-get remove --auto-remove -y --purge "$pkg"
             fi
           done
           sudo apt-get autoremove -y
           sudo apt-get clean
-          
-          # Python版本控制（网页3）
+    
+          # Python版本控制
           echo "→ 保留Python 3.10.16..."
-          if [ -d "/opt/hostedtoolcache/Python" ]; then
-            sudo find /opt/hostedtoolcache/Python -maxdepth 1 -type d ! -name "3.10.16" -exec rm -rf {} +
-          fi
-
-          # SDK清理（网页1）
+          sudo find /opt/hostedtoolcache/Python -maxdepth 1 \
+            -type d ! -name "3.10.16" -exec rm -rf {} +
+    
+          # SDK清理（修复find语法）
           echo "→ 清理开发工具链..."
           sudo find /usr/lib -type d $ \
             -name "azure*" \
             -o -name "google*" \
             -o -name "jdk*" \
             -o -name "llvm*" $ -exec rm -rf {} +
-
-          # 系统缓存清理
-          echo "→ 清除系统残留..."
-          sudo rm -rf \
-            /var/lib/apt/lists/* \
-            /usr/local/share/boost \
-            /tmp/* \
-            ~/.cache/pip
 
       - name: 清理验证
         run: |
