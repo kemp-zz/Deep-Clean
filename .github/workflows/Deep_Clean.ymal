@@ -1,1 +1,52 @@
 
+name: Deep Clean
+on:
+  schedule:
+    - cron: '0 3 * * 0'  # 每周日凌晨3点执行
+  workflow_dispatch:     # 支持手动触发
+
+jobs:
+  storage-cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@8e5e7e5ab8b088d843c634b361c005a12e6d5e8a  # 固定提交哈希[5](@ref)
+
+      - name: Rotate system logs
+        run: |
+          sudo journalctl --vacuum-time=7d
+          sudo find /var/log -name "*.gz" -mtime +14 -exec rm -f {} \;
+          echo "剩余日志空间: $(df -h /var/log | awk 'NR==2{print $4}')"
+
+      - name: Purge Docker artifacts
+        shell: bash
+        env:
+          DOCKER_CLEAN_FLAG: "aggressive"
+        run: |
+          docker system prune -a --volumes --force
+          sudo find /var/lib/docker/overlay2 -type f -name "*.tmp" -mtime +3 -delete
+
+      - name: Kernel housekeeping
+        continue-on-error: true  # 防止旧内核清理失败阻断流程
+        run: |
+          current_kernel=$(uname -r | sed 's/-generic//')
+          sudo apt purge $(dpkg -l | awk '/linux-image-[0-9]/{print $2}' | \
+            grep -v $current_kernel | head -n -2)
+
+      - name: APT repository optimization
+        run: |
+          sudo apt autoremove --purge -y
+          sudo apt clean
+          sudo rm -rf /var/lib/apt/lists/*
+          
+      - name: Tempfile sanitation
+        run: |
+          sudo find /tmp -type f -mtime +7 -exec rm -f {} \;
+          sudo find /var/tmp -name "*.un~" -delete
+
+      - name: Storage verification
+        run: |
+          echo "最终存储状态:"
+          df -h / | grep -v Filesystem
+          sudo ncdu / --exclude /mnt /media -x
