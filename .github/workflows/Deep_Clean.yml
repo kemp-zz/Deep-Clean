@@ -1,70 +1,29 @@
 name: Deep Clean
+
+
 on:
   workflow_dispatch:
-
-permissions:
-  contents: read
-  actions: read
-  packages: read
-  id-token: write  # 新增安全令牌权限[7](@ref)
+  schedule:
+    - cron: 0 0 * * * # 每天凌晨执行一次
 
 jobs:
-  analyze:
+  env-check:
     runs-on: ubuntu-latest
     steps:
-      - name: Setup Core Tools
-        run: sudo apt-get install -y jq bc  # 确保依赖存在
-
-      - name: Run Storage Analyzer
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: 环境预检
         run: |
-          # 制品数据查询（空值优化）
-          artifacts=$(curl -sSf "${API_HEADER[@]}" \
-            "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/actions/artifacts")
-          artifact_mb=$(echo "$artifacts" | 
-            jq -r '[.artifacts[].size_in_bytes //0] | add | ./(1024 * 1024) | floor')MB
+          echo "▂▂▂▂▂▂▂▂ 存储诊断 ▂▂▂▂▂▂▂▂"
+          df -h /
+          echo "▂▂▂▂▂▂▂▂ 初始状态 ▂▂▂▂▂▂▂▂"
 
-          # 输出变量标准化
-          {
-            echo "artifact_mb<<EOF"
-            echo "$artifact_mb"
-            echo "EOF"
-          } >> $GITHUB_OUTPUT
-
-      - name: Notify Result
-        uses: actions/github-script@v6
-        with:
-          script: |
-            const fs = require('fs');
-            try {
-              const report = fs.readFileSync('storage-report.txt', 'utf8');
-              await github.rest.issues.createComment({
-                issue_number: context.issue.number,
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                body: `✅ 存储报告生成成功：\n\`\`\`\n${report}\n\`\`\``
-              });
-            } catch (error) {
-              core.setFailed(`通知失败: ${error}`);
-            }
-
-      - name: Upload Report
-        uses: actions/upload-artifact@v4  # 升级至 v4 版本[7](@ref)
-        with:
-          name: storage-report-${{ github.run_id }}
-          path: storage-report.txt
-          retention-days: 7  # 设置自动清理周期[6](@ref)
-
-      - name: Notify Result
-        if: always()
-        uses: actions/github-script@v6
-        with:
-          script: |
-            const report = fs.readFileSync('storage-report.txt', 'utf8')
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: `📣 存储监控报告：\n\`\`\`\n${report}\n\`\`\``
-            })
+      - name: 查询固化的apt和pip包
+        run: |
+          echo "▂▂▂▂▂▂▂▂ 查询固化的apt和pip包 ▂▂▂▂▂▂▂▂"
+          
+          # 查询固化的apt包
+          echo "固化的apt包:"
+          dpkg -l | grep -v "ii\|rc" | awk '{print $2}'
+          
+          # 查询固化的pip包
+          echo "固化的pip包:"
+          pip list --format=columns
