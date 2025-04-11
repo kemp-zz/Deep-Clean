@@ -54,11 +54,7 @@ jobs:
           sudo find /tmp -type f -mtime +7 -exec rm -f {} \;
           sudo find /var/tmp -name "*.un~" -delete
 
-     jobs:
-  storage-cleanup:
-    # 保留原有配置...
-    steps:
-      # 保留原有步骤...
+
       
       - name: Android SDK Cleanup
         continue-on-error: true
