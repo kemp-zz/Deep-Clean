@@ -60,30 +60,28 @@ jobs:
         continue-on-error: true
         run: |
           echo "▂▂▂▂▂▂▂▂ Android SDK 深度清理 ▂▂▂▂▂▂▂▂"
-          # 删除未使用的SDK组件（需预装Android命令行工具）[2,3](@ref)
+          # 动态检测并卸载存在的SDK包
           if [ -d "/usr/local/lib/android/sdk/cmdline-tools/latest/bin" ]; then
-            /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager --uninstall \
-              "build-tools;34.0.0" "platforms;android-33" \
-              "system-images;android-30;google_apis;x86_64"
+            installed_packages=$(/usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager --list_installed)
+            target_packages=("build-tools;34.0.0" "platforms;android-33" "system-images;android-30;google_apis;x86_64")
+            for pkg in "${target_packages[@]}"; do
+              if echo "$installed_packages" | grep -q "$pkg"; then
+                echo "正在卸载：$pkg"
+                /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager --uninstall "$pkg"
+              fi
+            done
           fi
-          
-          # 清理缓存和临时文件[2](@ref)
-          find /usr/local/lib/android/sdk -name "*.tmp" -mtime +7 -delete
-          rm -rf /usr/local/lib/android/sdk/emulator/qemu/*.lock
-          
-          # 删除残留目录（保留最新两个版本）
-          ls -dt /usr/local/lib/android/sdk/build-tools/* | tail -n +3 | xargs rm -rf
 
       - name: Third-party Toolchain Purge
         run: |
           echo "▂▂▂▂▂▂▂▂ 第三方工具链清理 ▂▂▂▂▂▂▂▂"
-          # 清理 GitHub Hosted Toolcache（增强版）
-          sudo find /opt/hostedtoolcache -maxdepth 2 -type  $ 
-            -name "1.2*" -o 
-            -name "node_modules" -o 
-            -name "__pycache__" 
+          # 修复      后的find命令
+          sudo find /opt/hostedtoolcache -maxdepth 2 -type $ \
+            -name "1.2*" -o \
+            -name "node_modules" -o \
+            -name "__pycache__" \
           $ -mtime +30 -exec rm -rf {} + 2>/dev/null
-      
+            
           # 智能卸载 Node.js 全局模块（安全模式）
           npm list -g --depth=0 --parseable | 
           awk -F/ '{print $NF}' | 
