@@ -1,0 +1,76 @@
+name: Deep Clean
+on:
+  workflow_dispatch:
+jobs:
+  storage-cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      actions: write
+      contents: read
+
+    steps:
+      - name: 环境预检
+        run: |
+          set -euo pipefail
+          echo "▂▂▂▂▂▂▂▂ 路径验证 ▂▂▂▂▂▂▂▂"
+          
+          # 动态路径检测（修复不存在路径警告）
+          declare -a check_paths=(
+            "/usr/lib/python3.*/dist-packages"
+            "/usr/local/share/boost"
+            "/opt/hostedtoolcache/Python"
+          )
+          
+          for path in "${check_paths[@]}"; do
+            if compgen -G "$path" > /dev/null; then
+              echo "✅ 有效路径: $path"
+            else
+              echo "::warning::路径不存在: $path"
+            fi
+          done
+
+      - name: 智能清理
+        run: |
+          set -x
+          echo "▂▂▂▂▂▂▂▂ 执行清理 ▂▂▂▂▂▂▂▂"
+          
+          # 增强APT清理（修复No matching packages警告）
+          pkgs_to_remove=(
+            "azure-cli"
+            "google-cloud-cli"
+            "temurin-*-jdk"
+            "llvm-*-dev"
+          )
+          
+          for pkg in "${pkgs_to_remove[@]}"; do
+            if dpkg-query -W "$pkg" >/dev/null 2>&1; then
+              sudo apt-get remove -y --purge "$pkg"
+            else
+              echo "::warning::未找到包: $pkg"
+            fi
+          done
+          sudo apt-get autoremove -y
+          
+          # 修复Python版本清理（网页3）
+          echo "→ 智能保留Python版本..."
+          if [ -d "/opt/hostedtoolcache/Python" ]; then
+            py_versions=$(ls /opt/hostedtoolcache/Python | sort -Vr)
+            keep_versions=$(echo "$py_versions" | head -2)
+            echo "保留版本: $keep_versions"
+            echo "$py_versions" | tail -n +3 | xargs -I{} sudo rm -rf "/opt/hostedtoolcache/Python/{}"
+          fi
+
+          # 修复find命令语法（网页6）
+          if [ -d "/usr/lib/python3.12/dist-packages" ]; then
+            sudo find /usr/lib/python3.12/dist-packages -maxdepth 1 -type d $ \
+              -name "azure*" \
+              -o -name "google*" \
+              -o -name "jdk*" \
+              -o -name "llvm*" $ -exec rm -rf {} +
+          fi
+
+      - name: 最终验证
+        run: |
+          echo "▂▂▂▂▂▂▂▂ 清理结果 ▂▂▂▂▂▂▂▂"
+          sudo du -h --max-depth=2 /usr /opt /var 2>/dev/null | sort -hr | head -20
