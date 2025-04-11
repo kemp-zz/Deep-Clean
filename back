@@ -1,26 +1,40 @@
-name: Deep Clean
-
-
+name: 清理磁盘空间
 
 on:
   workflow_dispatch:
 
 jobs:
-  disk-usage:
+  disk-cleanup:
     runs-on: ubuntu-latest
     steps:
       - name: 显示删除前的磁盘使用情况
         run: |
           echo "▂▂▂▂▂▂▂▂ 删除前磁盘使用情况 ▂▂▂▂▂▂▂▂"
           df -h /
+
       - name: 查询占用空间最大的目录
         run: |
           echo "查询占用空间最大的目录..."
           sudo du -h --max-depth=1 / | sort -hr
+
       - name: 查询占用空间最大的文件
         run: |
           echo "查询占用空间最大的文件..."
           sudo find / -type f -exec du -h {} + 2>/dev/null | sort -hr | head -n 10
+
+      - name: 清理不必要的文件和目录
+        run: |
+          echo "清理不必要的文件和目录..."
+          # 删除常见占用空间的大型目录或文件
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          
+          # 清理 Docker 镜像和构建缓存
+          sudo docker image prune --all --force
+          sudo docker builder prune --all --force
+
       - name: 显示删除后的磁盘使用情况
         run: |
           echo "▂▂▂▂▂▂▂▂ 删除后磁盘使用情况 ▂▂▂▂▂▂▂▂"
