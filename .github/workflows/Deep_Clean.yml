@@ -18,115 +18,66 @@ jobs:
 
       - name: Pre-Cleanup Checks
         run: |
+          # 验证 sudo 权限和路径存在性
           if ! sudo -n true 2>/dev/null; then
             echo "错误：工作流未配置sudo权限" >&2
             exit 1
           fi
-          ls -ld /usr/local/lib/python3.* /opt/hostedtoolcache
+          sudo du -sh /usr/local/lib/android/sdk 2>/dev/null || true
+          ls -ld /opt/hostedtoolcache
 
       - name: 第三方工具链原子级清理
         shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
         run: |
-          # 修复find命令（兼容多平台）
-          sudo find /opt/hostedtoolcache -maxdepth 2 \
-            \( -name "1.2*" -o -name "node_modules" -o -name "__pycache__" \) \
-            -mtime +30 -exec rm -rf {} + 2>/dev/null
+          # 清理工具链缓存（保留最近3个版本）
+          for tool in node go python; do
+            sudo find /opt/hostedtoolcache/$tool -maxdepth 1 -mindepth 1 | 
+              sort -V | head -n -3 | xargs -r sudo rm -rf
+          done
 
-          # 安全卸载全局Node模块（JSON解析版）
-          if ! command -v jq &> /dev/null; then
-            sudo apt-get update && sudo apt-get install -y jq
-          fi
+          # 删除30天前的 __pycache__
+          sudo find /opt/hostedtoolcache -name "__pycache__" -mtime +30 -exec rm -rf {} +
 
-          modules=$(npm list -g --depth=0 --json 2>/dev/null | 
-            jq -r '.dependencies | keys[]' |
-            grep -vE '^(npm|corepack)$') || true
-
-          if [ -n "$modules" ]; then
-            echo "$modules" | tr '\n' '\0' | xargs -0 -r sudo npm uninstall -g --no-audit
-            echo "已卸载全局模块：$(echo $modules | tr '\n' ' ')"
-          else
-            echo "无有效全局Node模块需清理"
-          fi
-      - name: 预装 Android SDK 工具
+      - name: Android SDK 全路径清理
         run: |
-          # 安装命令行工具[4](@ref)
-          mkdir -p ~/android-sdk/cmdline-tools/latest
-          wget https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
-          unzip commandlinetools-linux-*.zip -d ~/android-sdk/cmdline-tools/latest
-          rm commandlinetools-linux-*.zip
+          # 系统级 SDK 强制删除（参考网页6[6](@ref)和网页7[7](@ref)）
+          if [ -d "/usr/local/lib/android/sdk" ]; then
+            echo "▂▂▂▂▂▂▂▂ 强制清理系统级 SDK ▂▂▂▂▂▂▂▂"
+            sudo rm -rf /usr/local/lib/android/sdk
+            sudo sed -i '/ANDROID_HOME/d' /etc/environment
+          fi
+
+          # 安装新版 SDK 工具（兼容 Actions 环境）
+          mkdir -p ~/android-sdk/cmdline-tools
+          wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
+          unzip -q commandlinetools-linux-*.zip -d ~/android-sdk/cmdline-tools
+          mv ~/android-sdk/cmdline-tools/cmdline-tools ~/android-sdk/cmdline-tools/latest
           echo "ANDROID_HOME=$HOME/android-sdk" >> $GITHUB_ENV
-          echo "$HOME/android-sdk/cmdline-tools/latest/bin:$PATH" >> $GITHUB_ENV
+          echo "PATH=$HOME/android-sdk/cmdline-tools/latest/bin:$PATH" >> $GITHUB_ENV
+
       - name: 接受 Android 许可证
         run: |
           yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses
 
-      - name: Android SDK 清理
+      - name: SDK 组件智能清理
         run: |
-          # 列出可卸载的 NDK 版本[4](@ref)
+          # 批量卸载未安装的 NDK 版本（参考网页6[6](@ref)）
           $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --list --channel=0 | 
-            grep "ndk;" | 
-            awk '/not installed/{print $1}'
+            awk '/ndk;.*not installed/{gsub(/"/,"",$1); print $1}' | 
+            xargs -r $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --uninstall
 
-          # 安全卸载指定 NDK[1,4](@ref)
-          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --uninstall "ndk;21.4.7075529"
-          
-          # 清理过时资源[4](@ref)
+          # 清理 CMake 历史版本
           $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --uninstall "cmake;*" --include_obsolete
 
-
-    
-      - name: 工具链版本管理
-        run: |
-          # 保留最近 3 个 Node.js 版本
-          ls /opt/hostedtoolcache/node | sort -V | head -n -3 | xargs rm -rf
-
-      - name: PIP Ecosystem Sanitization
-        run: |
-          echo "▂▂▂▂▂▂▂▂ Python 环境清理 ▂▂▂▂▂▂▂▂"
-          # 分离用户级和系统级清理
-          pip list --user --format=freeze | 
-            grep -vE '^(pip|setuptools|wheel)==' | 
-            xargs -r pip uninstall -y
-
-          sudo python3 -m pip cache purge 2>/dev/null || true
-          sudo rm -rf ~/.cache/pip ~/.pyenv/versions/*
-          
-          sudo find /usr/local -path "*/__pycache__" -type d -exec rm -rf {} +
-          sudo find /usr/local -name "*.pyc" -mtime +7 -delete
-
-      - name: APT Nuclear Cleanup
-        run: |
-          echo "▂▂▂▂▂▂▂▂ APT 原子级清理 ▂▂▂▂▂▂▂▂"
-          # 修复参数顺序错误
-          sudo dpkg --force-depends -P \
-            google-cloud-sdk \
-            azure-cli \
-            postgresql-12 \
-            openjdk-11-jdk
-
-          sudo apt purge -y $(dpkg -l | awk '/^rc/{print $2}' | grep -vE '^(lib|fonts|linux)')
-          
-          current_kernel=$(uname -r | sed 's/-generic//')
-          sudo apt purge -y $(dpkg -l 'linux-headers-*' | awk '/^ii/{print $2}' | grep -v $current_kernel)
-
-      - name: Enhanced Storage Report
+      - name: 存储健康报告
         continue-on-error: true
         run: |
-          echo "▂▂▂▂▂▂▂▂ 存储分析报告 ▂▂▂▂▂▂▂▂"
-          # 预装ncdu工具
-          if ! command -v ncdu &> /dev/null; then
-            sudo apt-get update && sudo apt-get install -y ncdu
-          fi
-
-          sudo du -h --exclude={/proc,/sys,/dev} --max-depth=2 / 2>/dev/null | 
-            sort -hr | head -10 | awk '
-              BEGIN { print "路径                                   ➔ 占用空间" }
-              { printf "%-40s ➔ \033[36m%8s\033[0m\n", $2, $1 }'
-
+          sudo apt-get install -y ncdu jq
           sudo ncdu -x -o storage.json /
-          if [ -f storage.json ]; then
-            jq '[.directories[] | {path: .name, size: (.total_size/(1024 * 1024)|floor)}] | 
-              sort_by(-.size) | .[0:5]' storage.json
-          else
-            echo "存储分析报告生成失败"
-          fi
+          
+          echo "▂▂▂▂▂▂▂▂ 存储占用 TOP5 ▂▂▂▂▂▂▂▂"
+          jq -r '[.disk_usage.directories[] | 
+            select(.name != "/") | 
+            {path: .name, size: (.total_size/(1024 * 1024)|floor)}] | 
+            sort_by(-.size) | .[0:5] | 
+            .[] | "\(.path.padEnd(50)) ➔ \(.size)MB"' storage.json
