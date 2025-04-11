@@ -47,6 +47,17 @@ jobs:
           else
             echo "无有效全局Node模块需清理"
           fi
+      - name: Android SDK 清理
+        run: |
+          # 列出已安装的 SDK 包
+          sdkmanager --list | grep "not installed"
+          # 交互式选择卸载（示例卸载 NDK）
+          yes | sdkmanager --uninstall "ndk;21.4.7075529"
+    
+      - name: 工具链版本管理
+        run: |
+          # 保留最近 3 个 Node.js 版本
+          ls /opt/hostedtoolcache/node | sort -V | head -n -3 | xargs rm -rf
 
       - name: PIP Ecosystem Sanitization
         run: |
