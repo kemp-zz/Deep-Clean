@@ -11,7 +11,7 @@ jobs:
     permissions:
       contents: read
       actions: write
-      packages: write
+  
 
     steps:
       - name: Checkout code
@@ -25,25 +25,29 @@ jobs:
           fi
           ls -ld /usr/local/lib/python3.* /opt/hostedtoolcache
 
-      - name: 第三方工具链原子级清理
+       - name: 第三方工具链原子级清理
         run: |
-          # 修复find命令（已验证通过）
+          # 修复find命令（兼容多平台）
           sudo find /opt/hostedtoolcache -maxdepth 2 \
             $ -name "1.2*" -o -name "node_modules" -o -name "__pycache__" $ \
             -mtime +30 -exec rm -rf {} + 2>/dev/null
 
-          # 安全卸载全局Node模块（增强版）
-          modules=$(npm list -g --depth=0 --parseable 2>/dev/null | 
-            awk -F/ '{print $NF}' | 
-            grep -vE '^(npm|corepack|@[a-z]+/.*)$') || true
-          
+          # 安全卸载全局Node模块（JSON解析版）
+          if ! command -v jq &> /dev/null; then
+            sudo apt-get update && sudo apt-get install -y jq
+          fi
+    
+          modules=$(npm list -g --depth=0 --json 2>/dev/null | 
+            jq -r '.dependencies | keys[]' |
+            grep -vE '^(npm|corepack)$') || true
+    
           if [ -n "$modules" ]; then
-            echo "$modules" | xargs -r sudo npm uninstall -g --no-audit
-            echo "已卸载全局模块：$modules"
+            echo "$modules" | tr '\n' '\0' | xargs -0 -r sudo npm uninstall -g --no-audit
+            echo "已卸载全局模块：$(echo $modules | tr '\n' ' ')"
           else
             echo "无有效全局Node模块需清理"
           fi
-        shell: bash
+        shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
       - name: PIP Ecosystem Sanitization
         run: |
           echo "▂▂▂▂▂▂▂▂ Python 环境清理 ▂▂▂▂▂▂▂▂"
