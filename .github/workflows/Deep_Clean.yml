@@ -59,18 +59,25 @@ jobs:
       - name: Android SDK Cleanup
         continue-on-error: true
         run: |
-          echo "▂▂▂▂▂▂▂▂ Android SDK 深度清理 ▂▂▂▂▂▂▂▂"
-          # 动态检测并卸载存在的SDK包
-          if [ -d "/usr/local/lib/android/sdk/cmdline-tools/latest/bin" ]; then
-            installed_packages=$(/usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager --list_installed)
-            target_packages=("build-tools;34.0.0" "platforms;android-33" "system-images;android-30;google_apis;x86_64")
-            for pkg in "${target_packages[@]}"; do
-              if echo "$installed_packages" | grep -q "$pkg"; then
-                echo "正在卸载：$pkg"
-                /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager --uninstall "$pkg"
-              fi
-            done
-          fi
+          # 动态检测已安装的SDK包
+          installed_packages=$(/usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager --list_installed)
+    
+          # 目标清理包列表（按需扩展）
+          target_packages=(
+            "build-tools;34.0.0" 
+            "platforms;android-33"
+            "system-images;android-30;google_apis;x86_64"
+          )
+    
+          # 仅卸载存在的包
+          for pkg in "${target_packages[@]}"; do
+            if echo "$installed_packages" | grep -q "$pkg"; then
+              echo "正在卸载：$pkg"
+              /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager --uninstall "$pkg"
+            else
+              echo "跳过未安装的包：$pkg"
+            fi
+          done
 
       - name: Third-party Toolchain Purge
         run: |
