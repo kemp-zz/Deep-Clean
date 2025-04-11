@@ -1,8 +1,6 @@
 
 name: Deep Clean
 on:
-  schedule:
-    - cron: '0 3 * * 0'  # 每周日凌晨3点执行
   workflow_dispatch:     # 支持手动触发
 
 jobs:
