@@ -12,62 +12,42 @@ jobs:
   analyze:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4  # 升级至最新稳定版[6](@ref)
-
       - name: Setup Core Tools
-        run: |
-          sudo apt-get update && sudo apt-get install -y bc jq  # 确保依赖工具安装[1](@ref)
+        run: sudo apt-get install -y jq bc  # 确保依赖存在
 
       - name: Run Storage Analyzer
-        id: storage
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # 动态解析仓库信息
-          REPO_OWNER=${GITHUB_REPOSITORY%/*}
-          REPO_NAME=${GITHUB_REPOSITORY#*/}
-
-          # API 请求头配置
-          API_HEADER=(
-            -H "Accept: application/vnd.github+json" 
-            -H "Authorization: Bearer $GITHUB_TOKEN"
-            -H "X-GitHub-Api-Version: 2022-11-28"
-          )
-
-          echo "::group::📊 存储数据采集中..."
-          
-          # 制品数据（自动处理空值）
+          # 制品数据查询（空值优化）
           artifacts=$(curl -sSf "${API_HEADER[@]}" \
             "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/actions/artifacts")
-          artifact_mb=$(echo "$artifacts" | jq -r '[.artifacts[].size_in_bytes //0] | add | . / (1024 * 1024) | floor')MB
+          artifact_mb=$(echo "$artifacts" | 
+            jq -r '[.artifacts[].size_in_bytes //0] | add | ./(1024 * 1024) | floor')MB
 
-          # 缓存数据（优化分页查询）
-          cache_usage=$(curl -sSf "${API_HEADER[@]}" \
-            "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/actions/cache/usage?per_page=100")
-          cache_mb=$(echo "$cache_usage" | jq -r '.full_cache_size_in_bytes / (1024 * 1024) | floor')MB
+          # 输出变量标准化
+          {
+            echo "artifact_mb<<EOF"
+            echo "$artifact_mb"
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
 
-          # 容器包数据（精确过滤仓库归属）
-          packages=$(curl -sSf "${API_HEADER[@]}" \
-            "https://api.github.com/orgs/$REPO_OWNER/packages?package_type=container")
-          package_mb=$(echo "$packages" | jq -r "[.[] | select(.repository.name == \"$REPO_NAME\") | .size_in_bytes] | add //0 / (1024 * 1024) | floor")MB
-
-          echo "::endgroup::"
-
-          # 生成多格式报告
-          cat <<EOF > storage-report.txt
-          ▂▂▂▂▂▂▂▂ 存储使用报告 ($(date +%F)) ▂▂▂▂▂▂▂▂
-          ✅ 制品存储：$artifact_mb (上限 2GB)
-          🔄 缓存使用：$cache_mb (上限 10GB)
-          📦 容器包：$package_mb (上限 1GB)
-          ▂▂▂▂▂▂▂▂ 总使用量 ▂▂▂▂▂▂▂▂
-          📈 合计：$(( ${artifact_mb/MB} + ${cache_mb/MB} + ${package_mb/MB} ))MB
-          EOF
-
-          # 输出变量供后续步骤使用
-          echo "artifact_mb=$artifact_mb" >> $GITHUB_OUTPUT
-          echo "cache_mb=$cache_mb" >> $GITHUB_OUTPUT
-          echo "package_mb=$package_mb" >> $GITHUB_OUTPUT
+      - name: Notify Result
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            try {
+              const report = fs.readFileSync('storage-report.txt', 'utf8');
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: `✅ 存储报告生成成功：\n\`\`\`\n${report}\n\`\`\``
+              });
+            } catch (error) {
+              core.setFailed(`通知失败: ${error}`);
+            }
 
       - name: Upload Report
         uses: actions/upload-artifact@v4  # 升级至 v4 版本[7](@ref)
