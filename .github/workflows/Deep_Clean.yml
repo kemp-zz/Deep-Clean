@@ -1,80 +1,92 @@
 name: Storage Monitor
 on:
   schedule:
-    - cron: '0 0 * * *'  # 每天 UTC 时间 0 点执行
-  workflow_dispatch:      # 允许手动触发
+    - cron: '0 0 * * *'  # 每天 UTC 0 点自动执行
+  workflow_dispatch:      # 支持手动触发
 
 permissions:
   contents: read
   actions: read
   packages: read
+  id-token: write  # 新增安全令牌权限[7](@ref)
 
 jobs:
   analyze:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4  # 升级至最新稳定版[6](@ref)
+
+      - name: Setup Core Tools
+        run: |
+          sudo apt-get update && sudo apt-get install -y bc jq  # 确保依赖工具安装[1](@ref)
 
       - name: Run Storage Analyzer
         id: storage
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # 使用内置令牌
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # 动态获取仓库信息
-          REPO_OWNER=$(echo "$GITHUB_REPOSITORY" | cut -d'/' -f1)
-          REPO_NAME=$(echo "$GITHUB_REPOSITORY" | cut -d'/' -f2)
-          
-          # 执行统计脚本
-          bash <<'EOF'
-          #!/bin/bash
-          set -eo pipefail
+          # 动态解析仓库信息
+          REPO_OWNER=${GITHUB_REPOSITORY%/*}
+          REPO_NAME=${GITHUB_REPOSITORY#*/}
 
           # API 请求头配置
-          API_HEADER=(-H "Accept: application/vnd.github+json" 
-                      -H "Authorization: Bearer $GITHUB_TOKEN"
-                      -H "X-GitHub-Api-Version: 2022-11-28")
+          API_HEADER=(
+            -H "Accept: application/vnd.github+json" 
+            -H "Authorization: Bearer $GITHUB_TOKEN"
+            -H "X-GitHub-Api-Version: 2022-11-28"
+          )
 
-          echo "::group::▂▂▂▂▂▂▂▂ 正在获取存储数据 ▂▂▂▂▂▂▂▂"
+          echo "::group::📊 存储数据采集中..."
           
-          # 制品数据查询
-          artifacts=$(curl -s "${API_HEADER[@]}" \
+          # 制品数据（自动处理空值）
+          artifacts=$(curl -sSf "${API_HEADER[@]}" \
             "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/actions/artifacts")
-          artifact_size=$(echo "$artifacts" | jq -r '[.artifacts[].size_in_bytes] | add //0')
-          artifact_mb=$(echo "scale=2; $artifact_size/1024/1024" | bc)MB
+          artifact_mb=$(echo "$artifacts" | jq -r '[.artifacts[].size_in_bytes //0] | add | . / (1024 * 1024) | floor')MB
 
-          # 缓存数据查询 (网页6)
-          cache_usage=$(curl -s "${API_HEADER[@]}" \
-            "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/actions/cache/usage")
-          cache_mb=$(echo "$cache_usage" | jq -r '.full_cache_size_in_bytes/1024/1024 | floor')MB
+          # 缓存数据（优化分页查询）
+          cache_usage=$(curl -sSf "${API_HEADER[@]}" \
+            "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/actions/cache/usage?per_page=100")
+          cache_mb=$(echo "$cache_usage" | jq -r '.full_cache_size_in_bytes / (1024 * 1024) | floor')MB
 
-          # 容器包数据查询 (网页3)
-          packages=$(curl -s "${API_HEADER[@]}" \
-            "https://api.github.com/users/$REPO_OWNER/packages?package_type=container")
-          package_mb=$(echo "$packages" | jq -r '[.[].size_in_bytes] | add //0/1024/1024 | floor')MB
+          # 容器包数据（精确过滤仓库归属）
+          packages=$(curl -sSf "${API_HEADER[@]}" \
+            "https://api.github.com/orgs/$REPO_OWNER/packages?package_type=container")
+          package_mb=$(echo "$packages" | jq -r "[.[] | select(.repository.name == \"$REPO_NAME\") | .size_in_bytes] | add //0 / (1024 * 1024) | floor")MB
 
           echo "::endgroup::"
 
-          # 生成报告文件
-          echo "▂▂▂▂▂▂▂▂ 持久化存储统计 ▂▂▂▂▂▂▂▂
-          制品存储：$artifact_mb (上限: 2GB)
-          缓存使用：$cache_mb (上限: 10GB)
-          容器包存储：$package_mb (上限: 1GB)
+          # 生成多格式报告
+          cat <<EOF > storage-report.txt
+          ▂▂▂▂▂▂▂▂ 存储使用报告 ($(date +%F)) ▂▂▂▂▂▂▂▂
+          ✅ 制品存储：$artifact_mb (上限 2GB)
+          🔄 缓存使用：$cache_mb (上限 10GB)
+          📦 容器包：$package_mb (上限 1GB)
           ▂▂▂▂▂▂▂▂ 总使用量 ▂▂▂▂▂▂▂▂
-          合计：$(echo "$artifact_mb $cache_mb $package_mb" | tr -d 'MB' | awk '{sum=$1+$2+$3; printf "%.2fMB\n", sum}')" > storage-report.txt
+          📈 合计：$(( ${artifact_mb/MB} + ${cache_mb/MB} + ${package_mb/MB} ))MB
+          EOF
 
-          # 输出到工作流变量
+          # 输出变量供后续步骤使用
           echo "artifact_mb=$artifact_mb" >> $GITHUB_OUTPUT
           echo "cache_mb=$cache_mb" >> $GITHUB_OUTPUT
           echo "package_mb=$package_mb" >> $GITHUB_OUTPUT
 
       - name: Upload Report
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4  # 升级至 v4 版本[7](@ref)
         with:
-          name: storage-report
+          name: storage-report-${{ github.run_id }}
           path: storage-report.txt
+          retention-days: 7  # 设置自动清理周期[6](@ref)
 
-      - name: Display Result
-        run: |
-          cat storage-report.txt
-          echo "::warning::总存储使用率：${{ steps.storage.outputs.artifact_mb }} + ${{ steps.storage.outputs.cache_mb }} + ${{ steps.storage.outputs.package_mb }}"
+      - name: Notify Result
+        if: always()
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const report = fs.readFileSync('storage-report.txt', 'utf8')
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `📣 存储监控报告：\n\`\`\`\n${report}\n\`\`\``
+            })
