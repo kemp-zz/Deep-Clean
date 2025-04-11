@@ -2,75 +2,33 @@ name: Deep Clean
 on:
   workflow_dispatch:
 jobs:
-  storage-cleanup:
+  analyze-storage:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
     permissions:
-      actions: write
       contents: read
 
     steps:
-      - name: 环境预检
+      - name: APT 软件分析
         run: |
-          set -euo pipefail
-          echo "▂▂▂▂▂▂▂▂ 路径验证 ▂▂▂▂▂▂▂▂"
-          
-          # 动态路径检测（修复不存在路径警告）
-          declare -a check_paths=(
-            "/usr/lib/python3.*/dist-packages"
-            "/usr/local/share/boost"
-            "/opt/hostedtoolcache/Python"
-          )
-          
-          for path in "${check_paths[@]}"; do
-            if compgen -G "$path" > /dev/null; then
-              echo "✅ 有效路径: $path"
-            else
-              echo "::warning::路径不存在: $path"
-            fi
-          done
-
-      - name: 智能清理
+          echo "▂▂▂▂▂▂▂▂ APT 占用TOP10 ▂▂▂▂▂▂▂▂"
+          sudo dpkg-query -Wf '${Installed-Size}\t${Package}\n' | 
+            sort -nr | 
+            head -10 |
+            awk '{printf "%-40s ➔ %8.2f MB\n", $2, $1/1024}'
+      - name: PIP 软件分析
         run: |
-          set -x
-          echo "▂▂▂▂▂▂▂▂ 执行清理 ▂▂▂▂▂▂▂▂"
-          
-          # 增强APT清理（修复No matching packages警告）
-          pkgs_to_remove=(
-            "azure-cli"
-            "google-cloud-cli"
-            "temurin-*-jdk"
-            "llvm-*-dev"
-          )
-          
-          for pkg in "${pkgs_to_remove[@]}"; do
-            if dpkg-query -W "$pkg" >/dev/null 2>&1; then
-              sudo apt-get remove -y --purge "$pkg"
-            else
-              echo "::warning::未找到包: $pkg"
-            fi
-          done
-          sudo apt-get autoremove -y
-          
-          # 修复Python版本清理（网页3）
-          echo "→ 智能保留Python版本..."
-          if [ -d "/opt/hostedtoolcache/Python" ]; then
-            py_versions=$(ls /opt/hostedtoolcache/Python | sort -Vr)
-            keep_versions=$(echo "$py_versions" | head -2)
-            echo "保留版本: $keep_versions"
-            echo "$py_versions" | tail -n +3 | xargs -I{} sudo rm -rf "/opt/hostedtoolcache/Python/{}"
-          fi
-
-          # 修复find命令语法（网页6）
-          if [ -d "/usr/lib/python3.12/dist-packages" ]; then
-            sudo find /usr/lib/python3.12/dist-packages -maxdepth 1 -type d $ \
-              -name "azure*" \
-              -o -name "google*" \
-              -o -name "jdk*" \
-              -o -name "llvm*" $ -exec rm -rf {} +
-          fi
-
-      - name: 最终验证
+          echo "▂▂▂▂▂▂▂▂ PIP 占用TOP10 ▂▂▂▂▂▂▂▂"
+          pip list --format=freeze | 
+            cut -d= -f1 | 
+            xargs -n1 pip show 2>/dev/null | 
+            awk '/Name:/ {name=$2} /Location:/ {print name, $2}' | 
+            xargs -I{} sh -c 'du -sh {}/ | sed "s/\/$//"' | 
+            sort -hr | 
+            head -10
+      - name: 存储诊断报告
         run: |
-          echo "▂▂▂▂▂▂▂▂ 清理结果 ▂▂▂▂▂▂▂▂"
-          sudo du -h --max-depth=2 /usr /opt /var 2>/dev/null | sort -hr | head -20
+          echo "▂▂▂▂▂▂▂▂ 存储热力图 ▂▂▂▂▂▂▂▂"
+          sudo du -d 1 -h /usr /opt /var 2>/dev/null | 
+            sort -hr | 
+            awk 'NR<=15 {printf "%-45s ➔ \033[36m%8s\033[0m\n", $2, $1}'
