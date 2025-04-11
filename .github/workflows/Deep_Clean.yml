@@ -77,28 +77,42 @@ jobs:
       - name: Third-party Toolchain Purge
         run: |
           echo "▂▂▂▂▂▂▂▂ 第三方工具链清理 ▂▂▂▂▂▂▂▂"
-          # 清理 GitHub Hosted Toolcache[1,4](@ref)
-          find /opt/hostedtoolcache -type d -name "1.2*" -mtime +30 -exec rm -rf {} +
-          
-          # 删除 Node.js 全局模块[6](@ref)
-          npm list -g --depth=0 | awk -F ' ' '{print $2}' | grep -v 'npm@' | xargs npm uninstall -g
-          
-          # 清理 Python 虚拟环境残留
-          find / -name ".venv" -type d -exec rm -rf {} +
+          # 清理 GitHub Hosted Toolcache（增强版）
+          sudo find /opt/hostedtoolcache -maxdepth 2 -type d $ 
+            -name "1.2*" -o 
+            -name "node_modules" -o 
+            -name "__pycache__" 
+          $ -mtime +30 -exec rm -rf {} + 2>/dev/null
+      
+          # 智能卸载 Node.js 全局模块（安全模式）
+          npm list -g --depth=0 --parseable | 
+          awk -F/ '{print $NF}' | 
+          grep -vE '^(npm|corepack)$' | 
+          xargs -r sudo npm uninstall -g --no-audit
+
+          # 靶向清理 Python 虚拟环境（防止误删系统目录）
+          find /home /opt /usr/local -name ".venv" -type d -exec sudo rm -rf {} +
+          find /tmp -name "venv" -type d -mtime +7 -exec rm -rf {} +
 
       - name: PIP Ecosystem Sanitization
         run: |
           echo "▂▂▂▂▂▂▂▂ Python 环境清理 ▂▂▂▂▂▂▂▂"
-          # 卸载所有用户安装的包[7](@ref)
-          pip list --user --format=freeze | grep -v '^\-e' | cut -d = -f 1 | xargs pip uninstall -y
-          
-          # 清除缓存和构建残留
-          rm -rf ~/.cache/pip ~/.local/lib/python* ~/.pyenv/versions/*
-          
-          # 删除 .egg-info 和 __pycache__
-          find / -type d -name "__pycache__" -exec rm -rf {} +
-          find / -name "*.egg-info" -exec rm -rf {} +
+          # 安全卸载用户级包（保留系统级依赖）[7](@ref)
+          pip list --user --format=freeze | 
+          grep -vE '^(pip|setuptools|wheel)==' | 
+          cut -d= -f1 | 
+          xargs -r pip uninstall -y
 
+          # 分层清理缓存（兼容多版本环境）[6,7](@ref)
+          pip cache purge 2>/dev/null || true
+          rm -rf ~/.cache/pip ~/.pyenv/versions/* 
+          find /usr/local -name "*.pyc" -delete
+
+          # 精准清理编译残留（限定作用域）
+          find /home /opt /usr/local -type d $ 
+            -name "__pycache__" -o 
+            -name "*.egg-info" 
+          $ -exec sudo rm -rf {} +
       - name: APT Nuclear Cleanup
         run: |
           echo "▂▂▂▂▂▂▂▂ APT 原子级清理 ▂▂▂▂▂▂▂▂"
