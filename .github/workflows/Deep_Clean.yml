@@ -1,13 +1,12 @@
 name: Deep Clean
 
-
 on:
   workflow_dispatch:
   schedule:
     - cron: 0 0 * * * # 每天凌晨执行一次
 
 jobs:
-  env-check:
+  delete-pip-packages:
     runs-on: ubuntu-latest
     steps:
       - name: 环境预检
@@ -16,14 +15,18 @@ jobs:
           df -h /
           echo "▂▂▂▂▂▂▂▂ 初始状态 ▂▂▂▂▂▂▂▂"
 
-      - name: 查询固化的apt和pip包
+      - name: 查询pip包
         run: |
-          echo "▂▂▂▂▂▂▂▂ 查询固化的apt和pip包 ▂▂▂▂▂▂▂▂"
-          
-          # 查询固化的apt包
-          echo "固化的apt包:"
-          dpkg -l | grep -v "ii\|rc" | awk '{print $2}'
-          
-          # 查询固化的pip包
-          echo "固化的pip包:"
+          echo "▂▂▂▂▂▂▂▂ 查询pip包 ▂▂▂▂▂▂▂▂"
           pip list --format=columns
+
+      - name: 删除pip包
+        run: |
+          echo "▂▂▂▂▂▂▂▂ 删除pip包 ▂▂▂▂▂▂▂▂"
+          pip_packages=$(pip list --format=freeze)
+          echo "$pip_packages" | xargs -n1 pip uninstall -y
+
+      - name: 清理验证
+        run: |
+          echo "▂▂▂▂▂▂▂▂ 最终状态 ▂▂▂▂▂▂▂▂"
+          df -h / | awk 'NR==2 {printf "总空间: %s ➔ 可用空间: %s\n", $2, $4}'
