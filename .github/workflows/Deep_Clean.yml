@@ -33,41 +33,41 @@ jobs:
           echo "▂▂▂▂▂▂▂▂ 初始空间 ▂▂▂▂▂▂▂▂"
           df -h /
 
-      - name: 智能清理引擎
+      - name: Android SDK 智能清理
+        continue-on-error: true
         run: |
-          set -eo pipefail
-          echo "▂▂▂▂▂▂▂▂ 执行清理 ▂▂▂▂▂▂▂▂"
-    
-          # APT深度清理
-          pkgs_to_remove=(
-            "azure-cli"
-            "google-cloud-cli"
-            "temurin-*-jdk" 
-            "llvm-*-dev"
+          # 动态检测已安装包
+          installed_packages=$(/usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager --list_installed)
+
+          # 正则严格匹配目标包
+          target_packages=(
+            "^build-tools;34\.0\.0$"
+            "^platforms;android-33$"
+            "^system-images;android-30;google_apis;x86_64$"
           )
-    
-          for pkg in "${pkgs_to_remove[@]}"; do
-            if dpkg-query -W "$pkg" >/dev/null 2>&1; then
-              sudo apt-get remove --auto-remove -y --purge "$pkg"
+
+          # 精确卸载存在的包
+          for pkg in "${target_packages[@]}"; do
+            if echo "$installed_packages" | grep -Pq "$pkg"; then
+              echo "正在卸载：$pkg"
+              /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager --uninstall "$pkg"
+            else
+              echo "跳过未安装的包：$pkg"
             fi
           done
-          sudo apt-get autoremove -y
-          sudo apt-get clean
-          sudo rm -rf /var/cache/apt/archives/*
-    
-          # 完全删除所有Python版本
-          echo "→ 删除全部Python版本..."
-          if [ -d "/opt/hostedtoolcache/Python" ]; then
-            sudo rm -rf /opt/hostedtoolcache/Python
+
+      - name: 第三方工具链原子级清理
+        run: |
+          # 修复后的 find 命令
+          sudo find /opt/hostedtoolcache -maxdepth 2 \
+            \( -name "1.2*" -o -name "node_modules" -o -name "__pycache__" \) \
+            -mtime +30 -exec rm -rf {} + 2>/dev/null
+
+          # 安全版 Node 模块卸载
+          modules=$(npm list -g --depth=0 --parseable | awk -F/ '{print $NF}' | grep -vE '^(npm|corepack)$')
+          if [[ -n "$modules" ]]; then
+            echo "$modules" | xargs sudo npm uninstall -g --no-audit 2>/dev/null
           fi
-    
-          # SDK清理（修复语法）
-          echo "→ 清理开发工具链..."
-          sudo find /usr/lib -type d $ \
-            -name "azure*" \
-            -o -name "google*" \
-            -o -name "jdk*" \
-            -o -name "llvm*" $ -exec rm -rf {} +
 
       - name: 清理验证
         run: |
