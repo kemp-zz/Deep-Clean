@@ -1,4 +1,6 @@
-jobs:
+name: Deep Clean
+on: workflow_dispatch
+obs:
   storage-cleanup:
     runs-on: ubuntu-latest
     timeout-minutes: 35
