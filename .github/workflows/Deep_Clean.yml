@@ -1,7 +1,7 @@
 name: Deep Clean
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   workflow_dispatch:
 
 jobs:
@@ -11,7 +11,6 @@ jobs:
     permissions:
       contents: read
       actions: write
-  
 
     steps:
       - name: Checkout code
@@ -25,33 +24,34 @@ jobs:
           fi
           ls -ld /usr/local/lib/python3.* /opt/hostedtoolcache
 
-       - name: 第三方工具链原子级清理
+      - name: 第三方工具链原子级清理
+        shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
         run: |
           # 修复find命令（兼容多平台）
           sudo find /opt/hostedtoolcache -maxdepth 2 \
-            $ -name "1.2*" -o -name "node_modules" -o -name "__pycache__" $ \
+            \( -name "1.2*" -o -name "node_modules" -o -name "__pycache__" \) \
             -mtime +30 -exec rm -rf {} + 2>/dev/null
 
           # 安全卸载全局Node模块（JSON解析版）
           if ! command -v jq &> /dev/null; then
             sudo apt-get update && sudo apt-get install -y jq
           fi
-    
+
           modules=$(npm list -g --depth=0 --json 2>/dev/null | 
             jq -r '.dependencies | keys[]' |
             grep -vE '^(npm|corepack)$') || true
-    
+
           if [ -n "$modules" ]; then
             echo "$modules" | tr '\n' '\0' | xargs -0 -r sudo npm uninstall -g --no-audit
             echo "已卸载全局模块：$(echo $modules | tr '\n' ' ')"
           else
             echo "无有效全局Node模块需清理"
           fi
-        shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+
       - name: PIP Ecosystem Sanitization
         run: |
           echo "▂▂▂▂▂▂▂▂ Python 环境清理 ▂▂▂▂▂▂▂▂"
-          # 分离用户级和系统级清理[3,5](@ref)
+          # 分离用户级和系统级清理
           pip list --user --format=freeze | 
             grep -vE '^(pip|setuptools|wheel)==' | 
             xargs -r pip uninstall -y
@@ -65,7 +65,7 @@ jobs:
       - name: APT Nuclear Cleanup
         run: |
           echo "▂▂▂▂▂▂▂▂ APT 原子级清理 ▂▂▂▂▂▂▂▂"
-          # 修复参数顺序错误[1,5](@ref)
+          # 修复参数顺序错误
           sudo dpkg --force-depends -P \
             google-cloud-sdk \
             azure-cli \
@@ -81,7 +81,7 @@ jobs:
         continue-on-error: true
         run: |
           echo "▂▂▂▂▂▂▂▂ 存储分析报告 ▂▂▂▂▂▂▂▂"
-          # 预装ncdu工具[5](@ref)
+          # 预装ncdu工具
           if ! command -v ncdu &> /dev/null; then
             sudo apt-get update && sudo apt-get install -y ncdu
           fi
@@ -93,7 +93,8 @@ jobs:
 
           sudo ncdu -x -o storage.json /
           if [ -f storage.json ]; then
-            jq '[.directories[] | {path: .name, size: (.total_size/(1024 * 1024)|floor)}] | sort_by(-.size) | .[0:5]' storage.json
+            jq '[.directories[] | {path: .name, size: (.total_size/(1024 * 1024)|floor)}] | 
+              sort_by(-.size) | .[0:5]' storage.json
           else
             echo "存储分析报告生成失败"
           fi
