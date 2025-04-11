@@ -1,35 +1,27 @@
-name: Storage Analysis
-on: 
+name: Deep Clean
+
+
+
+on:
   workflow_dispatch:
 
 jobs:
-  analyze-storage:
+  disk-usage:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-    permissions:
-      contents: read
-
     steps:
-      - name: APT 软件分析
+      - name: 显示删除前的磁盘使用情况
         run: |
-          echo "▂▂▂▂▂▂▂▂ APT 占用TOP10 ▂▂▂▂▂▂▂▂"
-          sudo dpkg-query -Wf '${Installed-Size}\t${Package}\n' | 
-            sort -nr | 
-            head -10 |
-            awk '{printf "%-40s ➔ %8.2f MB\n", $2, $1/1024}'
-      - name: PIP 软件分析
+          echo "▂▂▂▂▂▂▂▂ 删除前磁盘使用情况 ▂▂▂▂▂▂▂▂"
+          df -h /
+      - name: 查询占用空间最大的目录
         run: |
-          echo "▂▂▂▂▂▂▂▂ PIP 占用TOP10 ▂▂▂▂▂▂▂▂"
-          pip list --format=freeze | 
-            cut -d= -f1 | 
-            xargs -n1 pip show 2>/dev/null | 
-            awk '/Name:/ {name=$2} /Location:/ {print name, $2}' | 
-            xargs -I{} sh -c 'du -sh {}/ | sed "s/\/$//"' | 
-            sort -hr | 
-            head -10
-      - name: 存储诊断报告
+          echo "查询占用空间最大的目录..."
+          sudo du -h --max-depth=1 / | sort -hr
+      - name: 查询占用空间最大的文件
         run: |
-          echo "▂▂▂▂▂▂▂▂ 存储热力图 ▂▂▂▂▂▂▂▂"
-          sudo du -d 1 -h /usr /opt /var 2>/dev/null | 
-            sort -hr | 
-            awk 'NR<=15 {printf "%-45s ➔ \033[36m%8s\033[0m\n", $2, $1}'
+          echo "查询占用空间最大的文件..."
+          sudo find / -type f -exec du -h {} + 2>/dev/null | sort -hr | head -n 10
+      - name: 显示删除后的磁盘使用情况
+        run: |
+          echo "▂▂▂▂▂▂▂▂ 删除后磁盘使用情况 ▂▂▂▂▂▂▂▂"
+          df -h /
