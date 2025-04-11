@@ -56,22 +56,22 @@ jobs:
 
 
       
-      - name: Android SDK Cleanup
+      - name: Android SDK 智能清理
         continue-on-error: true
         run: |
-          # 动态检测已安装的SDK包
+          # 动态检测已安装包
           installed_packages=$(/usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager --list_installed)
     
-          # 目标清理包列表（按需扩展）
+          # 正则严格匹配目标包
           target_packages=(
-            "build-tools;34.0.0" 
-            "platforms;android-33"
-            "system-images;android-30;google_apis;x86_64"
+                  "^build-tools;34\.0\.0$"
+                  "^platforms;android-33$"
+                  "^system-images;android-30;google_apis;x86_64$"
           )
     
-          # 仅卸载存在的包
+          # 精确卸载存在的包
           for pkg in "${target_packages[@]}"; do
-            if echo "$installed_packages" | grep -q "$pkg"; then
+            if echo "$installed_packages" | grep -Pq "$pkg"; then
               echo "正在卸载：$pkg"
               /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager --uninstall "$pkg"
             else
@@ -79,18 +79,20 @@ jobs:
             fi
           done
 
-      - name: Third-party Toolchain Purge
+      - name: 第三方工具链原子级清理
         run: |
-          # 修复后的find命令
+          # 修复后的 find 命令
           sudo find /opt/hostedtoolcache -maxdepth 2 -type $ \
             -name "1.2*" -o \
             -name "node_modules" -o \
             -name "__pycache__" \
           $ -mtime +30 -exec rm -rf {} + 2>/dev/null
-
-          # 安全版Node模块卸载
+    
+          # 安全版 Node 模块卸载
           modules=$(npm list -g --depth=0 --parseable | awk -F/ '{print $NF}' | grep -vE '^(npm|corepack)$')
-          [[ -n "$modules" ]] && echo "$modules" | xargs sudo npm uninstall -g --no-audit 2>/dev/null
+          if [[ -n "$modules" ]]; then
+            echo "$modules" | xargs sudo npm uninstall -g --no-audit 2>/dev/null
+          fi
 
       - name: PIP Ecosystem Sanitization
         run: |
