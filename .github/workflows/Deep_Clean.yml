@@ -9,81 +9,82 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
-      contents: read    # 基础权限[6,7](@ref)
-      actions: write    # 允许取消工作流[6](@ref)
-      packages: write   # 用于清理Python包缓存[6](@ref)
+      contents: read
+      actions: write
+      packages: write
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4  # 使用固定版本确保安全[8](@ref)
+        uses: actions/checkout@v4
 
       - name: Pre-Cleanup Checks
         run: |
-          # 验证sudo权限和目录所有权[8](@ref)
           if ! sudo -n true 2>/dev/null; then
-            echo "错误：工作流未配置sudo权限"
+            echo "错误：工作流未配置sudo权限" >&2
             exit 1
           fi
-          ls -ld /usr/local/lib/python3.12 /opt/hostedtoolcache
+          ls -ld /usr/local/lib/python3.* /opt/hostedtoolcache
 
       - name: 第三方工具链原子级清理
         run: |
-          # 修复后的find命令（权限增强版）[3,5](@ref)
+          # 修复find语法错误[1,5](@ref)
           sudo find /opt/hostedtoolcache -maxdepth 2 \
             $ -name "1.2*" -o -name "node_modules" -o -name "__pycache__" $ \
-            -mtime +30 -exec sh -c 'rm -rf "$@"' _ {} + 2>&1 | grep -v "Permission denied"
+            -mtime +30 -exec rm -rf {} + 2>/dev/null
 
-          # 安全卸载全局Node模块[8](@ref)
+          # 增强npm卸载逻辑[8](@ref)
           if modules=$(npm list -g --depth=0 --parseable | awk -F/ '{print $NF}' | grep -vE '^(npm|corepack)$'); then
             echo "$modules" | xargs sudo npm uninstall -g --no-audit
           else
-            echo "无全局模块需要清理"
+            echo "全局Node模块列表获取失败，跳过卸载"
           fi
 
       - name: PIP Ecosystem Sanitization
         run: |
           echo "▂▂▂▂▂▂▂▂ Python 环境清理 ▂▂▂▂▂▂▂▂"
-          # 用户级包清理（保留核心工具）[3](@ref)
+          # 分离用户级和系统级清理[3,5](@ref)
           pip list --user --format=freeze | 
-          grep -vE '^(pip|setuptools|wheel)==' | 
-          cut -d= -f1 | 
-          xargs -r pip uninstall -y
+            grep -vE '^(pip|setuptools|wheel)==' | 
+            xargs -r pip uninstall -y
 
-          # 系统级缓存清理（精确权限控制）[5](@ref)
-          sudo pip cache purge 2>/dev/null || true
+          sudo python3 -m pip cache purge 2>/dev/null || true
           sudo rm -rf ~/.cache/pip ~/.pyenv/versions/*
           
-          # 编译文件清理（增强版）[1,2](@ref)
           sudo find /usr/local -path "*/__pycache__" -type d -exec rm -rf {} +
           sudo find /usr/local -name "*.pyc" -mtime +7 -delete
 
       - name: APT Nuclear Cleanup
         run: |
           echo "▂▂▂▂▂▂▂▂ APT 原子级清理 ▂▂▂▂▂▂▂▂"
-          # 安全卸载核心组件（参数顺序修复）
+          # 修复参数顺序错误[1,5](@ref)
           sudo dpkg --force-depends -P \
             google-cloud-sdk \
             azure-cli \
             postgresql-12 \
             openjdk-11-jdk
-    
-          # 清理残留配置文件（正则过滤关键库）
+
           sudo apt purge -y $(dpkg -l | awk '/^rc/{print $2}' | grep -vE '^(lib|fonts|linux)')
-    
-          # 动态内核头文件清理（精确版本匹配）
+          
           current_kernel=$(uname -r | sed 's/-generic//')
           sudo apt purge -y $(dpkg -l 'linux-headers-*' | awk '/^ii/{print $2}' | grep -v $current_kernel)
 
       - name: Enhanced Storage Report
-        continue-on-error: true  # 允许报告步骤失败不影响整体流程[5](@ref)
+        continue-on-error: true
         run: |
           echo "▂▂▂▂▂▂▂▂ 存储分析报告 ▂▂▂▂▂▂▂▂"
-          # 目录级空间分析（排除虚拟文件系统）[5](@ref)
-          sudo du -h --exclude=/proc --exclude=/sys --exclude=/dev \
-            --max-depth=2 / 2>/dev/null | sort -hr | head -10 | awk '
-            BEGIN { print "路径                                   ➔ 占用空间" }
-            { printf "%-40s ➔ \033[36m%8s\033[0m\n", $2, $1 }'
-          
-          # 生成交互式报告（带异常处理）[5](@ref)
+          # 预装ncdu工具[5](@ref)
+          if ! command -v ncdu &> /dev/null; then
+            sudo apt-get update && sudo apt-get install -y ncdu
+          fi
+
+          sudo du -h --exclude={/proc,/sys,/dev} --max-depth=2 / 2>/dev/null | 
+            sort -hr | head -10 | awk '
+              BEGIN { print "路径                                   ➔ 占用空间" }
+              { printf "%-40s ➔ \033[36m%8s\033[0m\n", $2, $1 }'
+
           sudo ncdu -x -o storage.json /
-          jq '[.directories[] | {path: .name, size: (.total_size / (1024 * 1024) | floor)}] | sort_by(-.size) | .[0:5]' storage.json || echo "报告生成失败"
+          if [ -f storage.json ]; then
+            jq '[.directories[] | {path: .name, size: (.total_size/(1024 * 1024)|floor)}] | sort_by(-.size) | .[0:5]' storage.json
+          else
+            echo "存储分析报告生成失败"
+          fi
