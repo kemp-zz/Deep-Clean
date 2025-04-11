@@ -1,7 +1,6 @@
-name: Storage Analysis
-on: 
+name: Deep Clean
+on:
   workflow_dispatch:
-
 jobs:
   analyze-storage:
     runs-on: ubuntu-latest
