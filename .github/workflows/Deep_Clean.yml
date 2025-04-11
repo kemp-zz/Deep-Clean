@@ -47,12 +47,33 @@ jobs:
           else
             echo "无有效全局Node模块需清理"
           fi
+      - name: 预装 Android SDK 工具
+        run: |
+          # 安装命令行工具[4](@ref)
+          mkdir -p ~/android-sdk/cmdline-tools/latest
+          wget https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
+          unzip commandlinetools-linux-*.zip -d ~/android-sdk/cmdline-tools/latest
+          rm commandlinetools-linux-*.zip
+          echo "ANDROID_HOME=$HOME/android-sdk" >> $GITHUB_ENV
+          echo "$HOME/android-sdk/cmdline-tools/latest/bin:$PATH" >> $GITHUB_ENV
+      - name: 接受 Android 许可证
+        run: |
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses
+
       - name: Android SDK 清理
         run: |
-          # 列出已安装的 SDK 包
-          sdkmanager --list | grep "not installed"
-          # 交互式选择卸载（示例卸载 NDK）
-          yes | sdkmanager --uninstall "ndk;21.4.7075529"
+          # 列出可卸载的 NDK 版本[4](@ref)
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --list --channel=0 | 
+            grep "ndk;" | 
+            awk '/not installed/{print $1}'
+
+          # 安全卸载指定 NDK[1,4](@ref)
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --uninstall "ndk;21.4.7075529"
+          
+          # 清理过时资源[4](@ref)
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --uninstall "cmake;*" --include_obsolete
+
+
     
       - name: 工具链版本管理
         run: |
