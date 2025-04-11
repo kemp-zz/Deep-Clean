@@ -26,17 +26,6 @@ jobs:
           sudo du -sh /usr/local/lib/android/sdk 2>/dev/null || true
           ls -ld /opt/hostedtoolcache
 
-      - name: 第三方工具链原子级清理
-        shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
-        run: |
-          # 清理工具链缓存（保留最近3个版本）
-          for tool in node go python; do
-            sudo find /opt/hostedtoolcache/$tool -maxdepth 1 -mindepth 1 | 
-              sort -V | head -n -3 | xargs -r sudo rm -rf
-          done
-
-          # 删除30天前的 __pycache__
-          sudo find /opt/hostedtoolcache -name "__pycache__" -mtime +30 -exec rm -rf {} +
 
       - name: Android SDK 全路径清理
         run: |
