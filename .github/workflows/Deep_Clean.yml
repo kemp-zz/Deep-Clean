@@ -1,36 +1,72 @@
 name: Deep Clean
 on:
   workflow_dispatch:
+\
+
 jobs:
-  analyze-storage:
+  storage-cleanup:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     permissions:
       contents: read
+      actions: write
 
     steps:
-      - name: APT 软件分析
+      - name: 预清理验证
         run: |
-          echo "▂▂▂▂▂▂▂▂ APT 占用TOP10 ▂▂▂▂▂▂▂▂"
-          sudo dpkg-query -Wf '${Installed-Size}\t${Package}\n' | 
-            sort -nr | 
-            head -10 |
-            awk '{printf "%-40s ➔ %8.2f MB\n", $2, $1/1024}'
+          sudo -n true || (echo "::error::sudo权限验证失败" >&2; exit 1)
+          
+          # 扩展检测范围
+          declare -a targets=(
+            "/usr/local/lib"
+            "/opt/hostedtoolcache"
+            "/var/lib/apt/lists"
+            "/var/cache/apt"
+            "/usr/lib/python3/dist-packages"
+          )
+          echo "▂▂▂▂▂▂▂▂ 存储预检 ▂▂▂▂▂▂▂▂"
+          for dir in "${targets[@]}"; do
+            [ -d "$dir" ] && sudo du -sh "$dir" || echo "$dir 不存在"
+          done
 
-      - name: PIP 软件分析
+      - name: 智能清理
         run: |
-          echo "▂▂▂▂▂▂▂▂ PIP 占用TOP10 ▂▂▂▂▂▂▂▂"
-          pip list --format=freeze | 
-            cut -d= -f1 | 
-            xargs -n1 pip show 2>/dev/null | 
-            awk '/Name:/ {name=$2} /Location:/ {print name, $2}' | 
-            xargs -I{} sh -c 'du -sh {}/ | sed "s/\/$//"' | 
-            sort -hr | 
-            head -10
+          echo "▂▂▂▂▂▂▂▂ 执行深度清理 ▂▂▂▂▂▂▂▂"
+          
+          # APT专项清理 (网页1][6)
+          sudo apt-get autoremove -y --purge \
+            'azure-cli' \
+            'google-cloud-cli' \
+            'temurin-*-jdk' \
+            'llvm-*-dev'
+          sudo apt-get clean
+          
+          # 工具链版本控制 (网页3][8)
+          ls /opt/hostedtoolcache/node | sort -Vr | tail -n +4 | xargs -I{} sudo rm -rf /opt/hostedtoolcache/node/{}
+          ls /opt/hostedtoolcache/Python | sort -Vr | tail -n +3 | xargs -I{} sudo rm -rf /opt/hostedtoolcache/Python/{}
+          
+          # Python环境清理 (网页9][10)
+          pip cache purge
+          sudo find /usr/lib/python3/dist-packages -maxdepth 1 -type d $ \
+            -name "azure*" \
+            -o -name "google*" \
+            -o -name "jdk*" \
+            -o -name "llvm*" $ -exec rm -rf {} +
+          
+          # 系统缓存清理
+          sudo rm -rf /var/lib/apt/lists/*
+          sudo rm -rf /usr/local/share/boost
 
-      - name: 存储诊断报告
+      - name: 存储验证
+        continue-on-error: true
         run: |
-          echo "▂▂▂▂▂▂▂▂ 存储热力图 ▂▂▂▂▂▂▂▂"
-          sudo du -d 1 -h /usr /opt /var 2>/dev/null | 
-            sort -hr | 
-            awk 'NR<=15 {printf "%-45s ➔ \033[36m%8s\033[0m\n", $2, $1}'
+          echo "▂▂▂▂▂▂▂▂ 清理后诊断 ▂▂▂▂▂▂▂▂"
+          sudo du -d 2 -h /usr /opt /var 2>/dev/null | sort -hr | awk '
+            BEGIN {print "\033[1;36m存储路径\t\t占用空间\033[0m"}
+            $2 ~ /\/(node|Python|azure|google|jdk|llvm)/ {
+              printf "%-45s ➔ \033[31m%8s\033[0m\n", $2, $1
+              next
+            }
+            NR<=15 {
+              printf "%-45s ➔ \033[32m%8s\033[0m\n", $2, $1
+            }'
