@@ -1,7 +1,5 @@
 name: Deep Clean
 
-
-
 on:
   workflow_dispatch:
 
@@ -14,16 +12,15 @@ jobs:
           echo "▂▂▂▂▂▂▂▂ 删除前磁盘使用情况 ▂▂▂▂▂▂▂▂"
           df -h /
 
-      - name: 删除pip包
+      - name: 查询Debian安装的包
         run: |
-          echo "▂▂▂▂▂▂▂▂ 开始删除pip包 ▂▂▂▂▂▂▂▂"
-          pip_packages=$(pip list --format=freeze)
-          echo "$pip_packages" | xargs sudo pip uninstall -y || true
+          echo "查询Debian安装的包..."
+          dpkg-query -l | grep attrs || echo "attrs 包未找到"
 
-      - name: 删除Debian包
+      - name: 删除Debian安装的attrs包
         run: |
-          echo "▂▂▂▂▂▂▂▂ 删除Debian包 ▂▂▂▂▂▂▂▂"
-          sudo apt-get remove --auto-remove -y attrs
+          echo "尝试删除Debian安装的attrs包..."
+          sudo dpkg -r --force-depends attrs || echo "无法删除 attrs 包，请检查是否已正确安装"
 
       - name: 删除残留文件
         run: |
