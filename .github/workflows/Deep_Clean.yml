@@ -54,18 +54,87 @@ jobs:
           sudo find /tmp -type f -mtime +7 -exec rm -f {} \;
           sudo find /var/tmp -name "*.un~" -delete
 
-      - name: Enhanced Storage Report
+     jobs:
+  storage-cleanup:
+    # 保留原有配置...
+    steps:
+      # 保留原有步骤...
+      
+      - name: Android SDK Cleanup
+        continue-on-error: true
         run: |
-          echo "▂▂▂▂▂▂▂▂▂▂▂ 专业级存储分析报告 ▂▂▂▂▂▂▂▂▂▂▂"
+          echo "▂▂▂▂▂▂▂▂ Android SDK 深度清理 ▂▂▂▂▂▂▂▂"
+          # 删除未使用的SDK组件（需预装Android命令行工具）[2,3](@ref)
+          if [ -d "/usr/local/lib/android/sdk/cmdline-tools/latest/bin" ]; then
+            /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager --uninstall \
+              "build-tools;34.0.0" "platforms;android-33" \
+              "system-images;android-30;google_apis;x86_64"
+          fi
           
-          # 分区使用率可视化[5](@ref)
-          df -h / | awk 'NR==2 { 
-            split($5,pct,"%");
-            blocks = int(pct[1]/2);
-            printf "根分区: \033[33m%-15s\033[0m 使用率: \033[31m%2d%%\033[0m [", $1, pct[1];
-            for(i=0;i<50;i++) printf (i<blocks?"\033[42m ":"\033[47m ");
-            print "\033[0m]\n"
-          }'
+          # 清理缓存和临时文件[2](@ref)
+          find /usr/local/lib/android/sdk -name "*.tmp" -mtime +7 -delete
+          rm -rf /usr/local/lib/android/sdk/emulator/qemu/*.lock
+          
+          # 删除残留目录（保留最新两个版本）
+          ls -dt /usr/local/lib/android/sdk/build-tools/* | tail -n +3 | xargs rm -rf
+
+      - name: Third-party Toolchain Purge
+        run: |
+          echo "▂▂▂▂▂▂▂▂ 第三方工具链清理 ▂▂▂▂▂▂▂▂"
+          # 清理 GitHub Hosted Toolcache[1,4](@ref)
+          find /opt/hostedtoolcache -type d -name "1.2*" -mtime +30 -exec rm -rf {} +
+          
+          # 删除 Node.js 全局模块[6](@ref)
+          npm list -g --depth=0 | awk -F ' ' '{print $2}' | grep -v 'npm@' | xargs npm uninstall -g
+          
+          # 清理 Python 虚拟环境残留
+          find / -name ".venv" -type d -exec rm -rf {} +
+
+      - name: PIP Ecosystem Sanitization
+        run: |
+          echo "▂▂▂▂▂▂▂▂ Python 环境清理 ▂▂▂▂▂▂▂▂"
+          # 卸载所有用户安装的包[7](@ref)
+          pip list --user --format=freeze | grep -v '^\-e' | cut -d = -f 1 | xargs pip uninstall -y
+          
+          # 清除缓存和构建残留
+          rm -rf ~/.cache/pip ~/.local/lib/python* ~/.pyenv/versions/*
+          
+          # 删除 .egg-info 和 __pycache__
+          find / -type d -name "__pycache__" -exec rm -rf {} +
+          find / -name "*.egg-info" -exec rm -rf {} +
+
+      - name: APT Nuclear Cleanup
+        run: |
+          echo "▂▂▂▂▂▂▂▂ APT 原子级清理 ▂▂▂▂▂▂▂▂"
+          # 彻底移除指定软件包[3,10](@ref)
+          sudo dpkg -P google-cloud-sdk azure-cli \
+            postgresql-12 openjdk-11-jdk \
+            --force-depends
+          
+          # 清除配置文件残留
+          sudo apt purge -y $(dpkg -l | grep '^rc' | awk '{print $2}')
+          
+          # 删除旧内核头文件（增强版）
+          sudo dpkg -l 'linux-headers-*' | awk '/^ii/{print $2}' | \
+            grep -v $(uname -r | sed 's/-generic//') | xargs sudo apt purge -y
+
+
+
+         - name: Enhanced Storage Report
+           run: |
+             # 生成 JSON 报告（增加 --quiet 减少输出干扰）
+             sudo ncdu -x --quiet -o storage.json /
+    
+             # 格式化解析并过滤错误
+             echo "▂▂▂▂▂▂▂▂ 详细分析 ▂▂▂▂▂▂▂▂"
+             jq -r '
+               if type == "array" then
+                 sort_by(.total_size) | reverse | .[0:5] | 
+                 map({path: .name, size: (.total_size / (1024 * 1024) | floor)})
+               else
+                 "错误：JSON 格式不符合预期"
+               end
+             ' storage.json
 
           # 目录级深度分析（TOP10）[6](@ref)
           echo "▂▂▂▂▂▂▂▂ 最大目录 TOP10 ▂▂▂▂▂▂▂▂"
