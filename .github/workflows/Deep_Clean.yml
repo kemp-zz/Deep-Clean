@@ -17,7 +17,6 @@ jobs:
           set -euo pipefail
           echo "▂▂▂▂▂▂▂▂ 存储诊断 ▂▂▂▂▂▂▂▂"
           
-          # 动态路径检测（网页3）
           declare -a check_paths=(
             "/usr/lib/python3.*/dist-packages"
             "/usr/local/share/boost"
@@ -33,13 +32,12 @@ jobs:
             fi
           done
 
-          # 初始存储状态
           echo "▂▂▂▂▂▂▂▂ 初始空间 ▂▂▂▂▂▂▂▂"
           df -h /
 
       - name: 智能清理引擎
         run: |
-          set -x
+          set -eo pipefail
           echo "▂▂▂▂▂▂▂▂ 执行清理 ▂▂▂▂▂▂▂▂"
     
           # APT深度清理
@@ -60,10 +58,12 @@ jobs:
     
           # Python版本控制
           echo "→ 保留Python 3.10.16..."
-          sudo find /opt/hostedtoolcache/Python -maxdepth 1 \
-            -type d ! -name "3.10.16" -exec rm -rf {} +
+          if [ -d "/opt/hostedtoolcache/Python/3.10.16" ]; then
+            sudo find /opt/hostedtoolcache/Python -maxdepth 1 \
+              -type d ! -name "3.10.16" -exec rm -rf {} +
+          fi
     
-          # SDK清理（修复find语法）
+          # SDK清理（修复语法）
           echo "→ 清理开发工具链..."
           sudo find /usr/lib -type d $ \
             -name "azure*" \
@@ -74,10 +74,8 @@ jobs:
       - name: 清理验证
         run: |
           echo "▂▂▂▂▂▂▂▂ 最终状态 ▂▂▂▂▂▂▂▂"
-          # 空间变化对比（网页6）
           df -h / | awk 'NR==2 {printf "总空间: %s ➔ 可用空间: %s\n", $2, $4}'
           
-          # 重点目录验证
           echo "▂▂▂▂▂▂▂▂ 目录详情 ▂▂▂▂▂▂▂▂"
           sudo du -d 2 -h /opt /usr/local 2>/dev/null | sort -hr | awk '
             BEGIN {print "\033[36m路径\t\t占用空间\033[0m"}
