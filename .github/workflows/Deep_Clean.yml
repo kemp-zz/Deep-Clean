@@ -4,11 +4,9 @@ name: Deep Clean
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: 0 0 * * * # 每天凌晨执行一次
 
 jobs:
-  delete-pip-packages:
+  delete-packages:
     runs-on: ubuntu-latest
     steps:
       - name: 显示删除前的磁盘使用情况
@@ -16,23 +14,21 @@ jobs:
           echo "▂▂▂▂▂▂▂▂ 删除前磁盘使用情况 ▂▂▂▂▂▂▂▂"
           df -h /
 
-      - name: 删除固化的pip包
+      - name: 删除pip包
         run: |
           echo "▂▂▂▂▂▂▂▂ 开始删除pip包 ▂▂▂▂▂▂▂▂"
-          # 获取所有安装的pip包列表
           pip_packages=$(pip list --format=freeze)
           echo "$pip_packages" | xargs sudo pip uninstall -y || true
 
-      - name: 修复权限问题
+      - name: 删除Debian包
         run: |
-          echo "修复权限问题..."
-          sudo chmod -R u+w /usr/lib/python3.12 || true
-          sudo chown -R $USER:$USER /usr/lib/python3.12 || true
+          echo "▂▂▂▂▂▂▂▂ 删除Debian包 ▂▂▂▂▂▂▂▂"
+          sudo apt-get remove --auto-remove -y attrs
 
-      - name: 再次尝试删除残留文件
+      - name: 删除残留文件
         run: |
           echo "尝试删除残留文件..."
-          sudo rm -rf /usr/lib/python3.12/*backend_c.cpython-312-x86_64-linux-gnu.so || true
+          sudo rm -rf /usr/lib/python3.12/site-packages/attrs*
 
       - name: 显示删除后的磁盘使用情况
         run: |
