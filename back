@@ -1,0 +1,35 @@
+name: Storage Analysis
+on: 
+  workflow_dispatch:
+
+jobs:
+  analyze-storage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+
+    steps:
+      - name: APT 软件分析
+        run: |
+          echo "▂▂▂▂▂▂▂▂ APT 占用TOP10 ▂▂▂▂▂▂▂▂"
+          sudo dpkg-query -Wf '${Installed-Size}\t${Package}\n' | 
+            sort -nr | 
+            head -10 |
+            awk '{printf "%-40s ➔ %8.2f MB\n", $2, $1/1024}'
+      - name: PIP 软件分析
+        run: |
+          echo "▂▂▂▂▂▂▂▂ PIP 占用TOP10 ▂▂▂▂▂▂▂▂"
+          pip list --format=freeze | 
+            cut -d= -f1 | 
+            xargs -n1 pip show 2>/dev/null | 
+            awk '/Name:/ {name=$2} /Location:/ {print name, $2}' | 
+            xargs -I{} sh -c 'du -sh {}/ | sed "s/\/$//"' | 
+            sort -hr | 
+            head -10
+      - name: 存储诊断报告
+        run: |
+          echo "▂▂▂▂▂▂▂▂ 存储热力图 ▂▂▂▂▂▂▂▂"
+          sudo du -d 1 -h /usr /opt /var 2>/dev/null | 
+            sort -hr | 
+            awk 'NR<=15 {printf "%-45s ➔ \033[36m%8s\033[0m\n", $2, $1}'
