@@ -1,5 +1,5 @@
 name: Deep Clean
-on: 
+on:
   push:
     branches: [ main ]
   workflow_dispatch:
@@ -8,14 +8,18 @@ jobs:
   storage-cleanup:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
+    
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4  # 使用最新稳定版
+        uses: actions/checkout@v4
 
       - name: Prepare Environment
         run: |
           sudo apt-get update
-          sudo apt-get install -y ncdu
+          sudo apt-get install -y ncdu jq  # 新增 JSON 解析工具[3](@ref)
 
       - name: Rotate system logs
         run: |
@@ -50,8 +54,32 @@ jobs:
           sudo find /tmp -type f -mtime +7 -exec rm -f {} \;
           sudo find /var/tmp -name "*.un~" -delete
 
-      - name: Storage verification
+      - name: Enhanced Storage Report
         run: |
-          echo "▂▂▂▂▂▂▂▂▂▂▂ 存储状态报告 ▂▂▂▂▂▂▂▂▂▂▂"
-          df -h / | grep -v Filesystem
-          sudo ncdu / --exclude /mnt /media -x
+          echo "▂▂▂▂▂▂▂▂▂▂▂ 专业级存储分析报告 ▂▂▂▂▂▂▂▂▂▂▂"
+          
+          # 分区使用率可视化[5](@ref)
+          df -h / | awk 'NR==2 { 
+            split($5,pct,"%");
+            blocks = int(pct[1]/2);
+            printf "根分区: \033[33m%-15s\033[0m 使用率: \033[31m%2d%%\033[0m [", $1, pct[1];
+            for(i=0;i<50;i++) printf (i<blocks?"\033[42m ":"\033[47m ");
+            print "\033[0m]\n"
+          }'
+
+          # 目录级深度分析（TOP10）[6](@ref)
+          echo "▂▂▂▂▂▂▂▂ 最大目录 TOP10 ▂▂▂▂▂▂▂▂"
+          sudo du -h --max-depth=2 / 2>/dev/null | sort -hr | head -10 | awk '
+            BEGIN { print "路径                                   ➔ 占用空间" }
+            { printf "%-40s ➔ \033[36m%8s\033[0m\n", $2, $1 }'
+
+          # 生成 ncdu JSON 报告[3,5](@ref)
+          sudo ncdu -x -o storage.json /
+          echo "▂▂▂▂▂▂▂▂ 详细分析 ▂▂▂▂▂▂▂▂"
+          jq '[.directories[] | {path: .name, size: (.total_size / (1024 * 1024) | floor)}] | sort_by(-.size) | .[0:5]' storage.json
+
+          # 潜在可释放空间预测[1](@ref)
+          echo "▂▂▂▂▂▂▂▂ 空间优化建议 ▂▂▂▂▂▂▂▂"
+          docker_size=$(docker system df --format '{{.Size}}' | awk '/GB/ {sum+=$1} END {print sum"GB"}')
+          journal_size=$(journalctl --disk-usage | awk '{print $7}')
+          echo "潜在可释放空间: Docker(${docker_size}) + 日志(${journal_size}MB)"
