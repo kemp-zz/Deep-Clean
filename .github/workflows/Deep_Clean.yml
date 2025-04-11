@@ -1,34 +1,103 @@
 name: Deep Clean
 on:
   workflow_dispatch:
+
+
 jobs:
-  analyze-storage:
+  storage-cleanup:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 35
     permissions:
+      actions: write
       contents: read
 
     steps:
-      - name: APT 软件分析
+      - name: 环境预检
         run: |
-          echo "▂▂▂▂▂▂▂▂ APT 占用TOP10 ▂▂▂▂▂▂▂▂"
-          sudo dpkg-query -Wf '${Installed-Size}\t${Package}\n' | 
-            sort -nr | 
-            head -10 |
-            awk '{printf "%-40s ➔ %8.2f MB\n", $2, $1/1024}'
-      - name: PIP 软件分析
+          set -euo pipefail
+          echo "▂▂▂▂▂▂▂▂ 存储诊断 ▂▂▂▂▂▂▂▂"
+          
+          # 动态路径检测（网页3）
+          declare -a check_paths=(
+            "/usr/lib/python3.*/dist-packages"
+            "/usr/local/share/boost"
+            "/opt/hostedtoolcache/Python"
+            "/var/lib/apt/lists"
+          )
+          
+          for path in "${check_paths[@]}"; do
+            if compgen -G "$path" > /dev/null; then
+              echo "✅ 有效路径: $(ls -d $path)"
+            else
+              echo "::warning::路径不存在: $path"
+            fi
+          done
+
+          # 初始存储状态
+          echo "▂▂▂▂▂▂▂▂ 初始空间 ▂▂▂▂▂▂▂▂"
+          df -h /
+
+      - name: 智能清理引擎
         run: |
-          echo "▂▂▂▂▂▂▂▂ PIP 占用TOP10 ▂▂▂▂▂▂▂▂"
-          pip list --format=freeze | 
-            cut -d= -f1 | 
-            xargs -n1 pip show 2>/dev/null | 
-            awk '/Name:/ {name=$2} /Location:/ {print name, $2}' | 
-            xargs -I{} sh -c 'du -sh {}/ | sed "s/\/$//"' | 
-            sort -hr | 
-            head -10
-      - name: 存储诊断报告
+          set -x
+          echo "▂▂▂▂▂▂▂▂ 执行清理 ▂▂▂▂▂▂▂▂"
+          
+          # APT专项清理（网页6）
+          pkgs_to_remove=(
+            "azure-cli"
+            "google-cloud-cli"
+            "temurin-*-jdk"
+            "llvm-*-dev"
+            "microsoft-edge-stable"
+          )
+          
+          for pkg in "${pkgs_to_remove[@]}"; do
+            if dpkg-query -W "$pkg" >/dev/null 2>&1; then
+              echo "→ 删除 $pkg..."
+              sudo apt-get remove -y --auto-remove --purge "$pkg"
+            else
+              echo "::warning::未找到包: $pkg"
+            fi
+          done
+          sudo apt-get autoremove -y
+          sudo apt-get clean
+          
+          # Python版本控制（网页3）
+          echo "→ 保留Python 3.10.16..."
+          if [ -d "/opt/hostedtoolcache/Python" ]; then
+            sudo find /opt/hostedtoolcache/Python -maxdepth 1 -type d ! -name "3.10.16" -exec rm -rf {} +
+          fi
+
+          # SDK清理（网页1）
+          echo "→ 清理开发工具链..."
+          sudo find /usr/lib -type d $ \
+            -name "azure*" \
+            -o -name "google*" \
+            -o -name "jdk*" \
+            -o -name "llvm*" $ -exec rm -rf {} +
+
+          # 系统缓存清理
+          echo "→ 清除系统残留..."
+          sudo rm -rf \
+            /var/lib/apt/lists/* \
+            /usr/local/share/boost \
+            /tmp/* \
+            ~/.cache/pip
+
+      - name: 清理验证
         run: |
-          echo "▂▂▂▂▂▂▂▂ 存储热力图 ▂▂▂▂▂▂▂▂"
-          sudo du -d 1 -h /usr /opt /var 2>/dev/null | 
-            sort -hr | 
-            awk 'NR<=15 {printf "%-45s ➔ \033[36m%8s\033[0m\n", $2, $1}'
+          echo "▂▂▂▂▂▂▂▂ 最终状态 ▂▂▂▂▂▂▂▂"
+          # 空间变化对比（网页6）
+          df -h / | awk 'NR==2 {printf "总空间: %s ➔ 可用空间: %s\n", $2, $4}'
+          
+          # 重点目录验证
+          echo "▂▂▂▂▂▂▂▂ 目录详情 ▂▂▂▂▂▂▂▂"
+          sudo du -d 2 -h /opt /usr/local 2>/dev/null | sort -hr | awk '
+            BEGIN {print "\033[36m路径\t\t占用空间\033[0m"}
+            $2 ~ /(node|Python|jdk)/ {
+              printf "%-45s ➔ \033[31m%8s\033[0m\n", $2, $1
+              next
+            }
+            NR<=10 {
+              printf "%-45s ➔ \033[32m%8s\033[0m\n", $2, $1
+            }'
