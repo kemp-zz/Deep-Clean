@@ -1,7 +1,5 @@
 name: Deep Clean
 
-name: 查询和清理占用空间的软件
-
 on:
   workflow_dispatch:
 
