@@ -18,25 +18,39 @@ jobs:
 
       - name: Pre-Cleanup Checks
         run: |
-          # 验证 sudo 权限和路径存在性
+          # 验证 sudo 权限和路径存在性 [1](@ref)
           if ! sudo -n true 2>/dev/null; then
             echo "错误：工作流未配置sudo权限" >&2
             exit 1
           fi
           sudo du -sh /usr/local/lib/android/sdk 2>/dev/null || true
-          ls -ld /opt/hostedtoolcache
+          sudo du -sh /var/lib/gems /usr/share/miniconda /usr/lib/google-cloud-sdk 2>/dev/null
 
-
-      - name: Android SDK 全路径清理
+      - name: 多路径强制清理
         run: |
-          # 系统级 SDK 强制删除（参考网页6[6](@ref)和网页7[7](@ref)）
+          # 清理系统级 SDK [4,5](@ref)
           if [ -d "/usr/local/lib/android/sdk" ]; then
             echo "▂▂▂▂▂▂▂▂ 强制清理系统级 SDK ▂▂▂▂▂▂▂▂"
             sudo rm -rf /usr/local/lib/android/sdk
             sudo sed -i '/ANDROID_HOME/d' /etc/environment
           fi
 
-          # 安装新版 SDK 工具（兼容 Actions 环境）
+          # 清理其他指定目录 [1,5](@ref)
+          targets=(
+            "/var/lib/gems"
+            "/usr/share/miniconda"
+            "/usr/lib/google-cloud-sdk"
+          )
+          for dir in "${targets[@]}"; do
+            if [ -d "$dir" ]; then
+              echo "正在清理 $dir ..."
+              sudo rm -rf "$dir"
+            fi
+          done
+
+      - name: 安装新版 SDK
+        run: |
+          # 沙盒化安装 SDK [4,11](@ref)
           mkdir -p ~/android-sdk/cmdline-tools
           wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
           unzip -q commandlinetools-linux-*.zip -d ~/android-sdk/cmdline-tools
@@ -50,17 +64,18 @@ jobs:
 
       - name: SDK 组件智能清理
         run: |
-          # 批量卸载未安装的 NDK 版本（参考网页6[6](@ref)）
+          # 批量清理未安装组件 [5,7](@ref)
           $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --list --channel=0 | 
             awk '/ndk;.*not installed/{gsub(/"/,"",$1); print $1}' | 
             xargs -r $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --uninstall
 
-          # 清理 CMake 历史版本
+          # 清理历史版本 [4](@ref)
           $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --uninstall "cmake;*" --include_obsolete
 
       - name: 存储健康报告
         continue-on-error: true
         run: |
+          # 修复 JSON 解析错误 [9](@ref)
           sudo apt-get install -y ncdu jq
           sudo ncdu -x -o storage.json /
           
@@ -69,4 +84,4 @@ jobs:
             select(.name != "/") | 
             {path: .name, size: (.total_size/(1024 * 1024)|floor)}] | 
             sort_by(-.size) | .[0:5] | 
-            .[] | "\(.path.padEnd(50)) ➔ \(.size)MB"' storage.json
+            .[] | "\(.path) ➔ \(.size)MB"' storage.json
