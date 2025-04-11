@@ -1,8 +1,6 @@
 
 name: Deep Clean
-on:
-  workflow_dispatch:     # 支持手动触发
-
+on: [push, workflow_dispatch] 
 jobs:
   storage-cleanup:
     runs-on: ubuntu-latest
