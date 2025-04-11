@@ -78,7 +78,7 @@ jobs:
         run: |
           echo "▂▂▂▂▂▂▂▂ 第三方工具链清理 ▂▂▂▂▂▂▂▂"
           # 清理 GitHub Hosted Toolcache（增强版）
-          sudo find /opt/hostedtoolcache -maxdepth 2 -type d $ 
+          sudo find /opt/hostedtoolcache -maxdepth 2 -type  $ 
             -name "1.2*" -o 
             -name "node_modules" -o 
             -name "__pycache__" 
