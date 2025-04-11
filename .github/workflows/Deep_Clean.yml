@@ -1,5 +1,7 @@
 name: Deep Clean
 
+
+
 on:
   workflow_dispatch:
 
@@ -17,29 +19,32 @@ jobs:
           echo "查询占用空间最大的目录..."
           sudo du -h --max-depth=1 / | sort -hr
 
-      - name: 查询/usr目录下占用空间最大的子目录
+      - name: 查询占用空间最大的文件
         run: |
-          echo "查询/usr目录下占用空间最大的子目录..."
-          sudo du -h --max-depth=1 /usr | sort -hr
+          echo "查询占用空间最大的文件..."
+          sudo find / -type f -exec du -h {} + 2>/dev/null | sort -hr | head -n 10
 
-      - name: 查询/opt目录下占用空间最大的子目录
+      - name: 清理不必要的文件和目录
         run: |
-          echo "查询/opt目录下占用空间最大的子目录..."
-          sudo du -h --max-depth=1 /opt | sort -hr
-
-      - name: 查询/mnt目录下占用空间最大的子目录
-        run: |
-          echo "查询/mnt目录下占用空间最大的子目录..."
-          sudo du -h --max-depth=1 /mnt | sort -hr
-
-      - name: 清理不必要的软件或文件
-        run: |
-          echo "清理不必要的软件或文件..."
-          # 删除不必要的软件或文件
-          # 例如删除/opt/hostedtoolcache下的某些工具
+          echo "清理不必要的文件和目录..."
+          # 删除常见占用空间的大型目录或文件
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
           sudo rm -rf /opt/hostedtoolcache/CodeQL
-          # 删除/mnt下的swapfile
-          sudo rm -rf /mnt/swapfile
+          
+          # 清理 Docker 镜像和构建缓存
+          sudo docker image prune --all --force
+          sudo docker builder prune --all --force
+
+      # 新增磁盘空间深度清理步骤 [4,5](@ref)
+      - name: Free Disk Space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          swap-storage: true  # 释放交换空间
+          docker-images: ${{ github.event_name != 'schedule' }}  # 非定期任务清理镜像
+          dotnet: false       # 已手动清理 .NET SDK
+          tool-cache: false   # 保留 /opt/hostedtoolcache 基础工具链
 
       - name: 显示删除后的磁盘使用情况
         run: |
