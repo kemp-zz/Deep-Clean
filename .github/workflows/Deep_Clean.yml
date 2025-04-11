@@ -1,56 +1,37 @@
-name: Deep Clean
-on:
+name: Storage Analysis
+on: 
   workflow_dispatch:
 
 jobs:
-  storage-cleanup:
+  analyze-storage:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     permissions:
       contents: read
-      actions: write
 
     steps:
-      - name: 预清理验证
+      - name: APT 软件分析
         run: |
-          # 验证sudo权限
-          sudo -n true || (echo "缺少sudo权限" >&2; exit 1)
-          
-          # 目标目录容量预检
-          declare -a targets=(
-            "/home/runneradmin/.rustup"
-            "/home/linuxbrew/.linuxbrew"
-            "/opt/pipx"
-            "/opt/hostedtoolcache"
-            "/var/lib/gems"
-          )
-          for dir in "${targets[@]}"; do
-            [ -d "$dir" ] && sudo du -sh "$dir" || echo "$dir 不存在"
-          done
+          echo "▂▂▂▂▂▂▂▂ APT 占用TOP10 ▂▂▂▂▂▂▂▂"
+          sudo dpkg-query -Wf '${Installed-Size}\t${Package}\n' | 
+            sort -nr | 
+            head -10 |
+            awk '{printf "%-40s ➔ %8.2f MB\n", $2, $1/1024}'
 
-      - name: 多级缓存清理
+      - name: PIP 软件分析
         run: |
-          # 原子级删除操作
-          sudo rm -rf \
-            /home/runneradmin/.rustup/settings.toml \
-            /home/linuxbrew/.linuxbrew/share/zsh \
-            /opt/pipx/venvs/ansible-core \
-            /opt/hostedtoolcache/node/18.*/x64/lib/node_modules/npm-bundled \
-            /var/lib/gems/3.2.0/gems/fastlane-2.227.0
+          echo "▂▂▂▂▂▂▂▂ PIP 占用TOP10 ▂▂▂▂▂▂▂▂"
+          pip list --format=freeze | 
+            cut -d= -f1 | 
+            xargs -n1 pip show 2>/dev/null | 
+            awk '/Name:/ {name=$2} /Location:/ {print name, $2}' | 
+            xargs -I{} sh -c 'du -sh {}/ | sed "s/\/$//"' | 
+            sort -hr | 
+            head -10
 
-          # 保留最近3个Node版本
-          ls /opt/hostedtoolcache/node | sort -V | head -n -3 | xargs -I{} sudo rm -rf /opt/hostedtoolcache/node/{}
-
-      - name: 修复存储报告
-        continue-on-error: true
+      - name: 存储诊断报告
         run: |
-          # 安装轻量级分析工具
-          sudo apt-get install -y jq
-          
-          # 生成存储报告（修复JSON结构）
-          sudo du -d 1 -h / 2>/dev/null | sort -hr | awk '
-            BEGIN {print "存储路径\t占用空间"}
-            NR<=10 {
-              gsub(/\/$/, "", $2); 
-              printf "%-45s ➔ \033[36m%8s\033[0m\n", $2, $1
-            }'
+          echo "▂▂▂▂▂▂▂▂ 存储热力图 ▂▂▂▂▂▂▂▂"
+          sudo du -d 1 -h /usr /opt /var 2>/dev/null | 
+            sort -hr | 
+            awk 'NR<=15 {printf "%-45s ➔ \033[36m%8s\033[0m\n", $2, $1}'
