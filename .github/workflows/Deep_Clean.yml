@@ -1,35 +1,113 @@
-name: Storage Analysis
-on: 
+name: Deep Clean
+on:
   workflow_dispatch:
 
 jobs:
-  analyze-storage:
+  storage-cleanup:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     permissions:
       contents: read
+      actions: write
 
     steps:
-      - name: APT 软件分析
+      - name: 预清理诊断
         run: |
-          echo "▂▂▂▂▂▂▂▂ APT 占用TOP10 ▂▂▂▂▂▂▂▂"
-          sudo dpkg-query -Wf '${Installed-Size}\t${Package}\n' | 
-            sort -nr | 
-            head -10 |
-            awk '{printf "%-40s ➔ %8.2f MB\n", $2, $1/1024}'
-      - name: PIP 软件分析
+          set -eo pipefail
+          echo "▂▂▂▂▂▂▂▂ 环境验证 ▂▂▂▂▂▂▂▂"
+          
+          # 增强权限验证(网页1)
+          if ! sudo -n true 2>/dev/null; then
+            echo "::error::sudo权限验证失败，请检查工作流配置"
+            exit 1
+          fi
+
+          # 扩展检测范围(网页2][3)
+          declare -a scan_dirs=(
+            "/usr/local/lib"
+            "/opt/hostedtoolcache"
+            "/var/lib/apt/lists"
+            "/var/cache/apt"
+            "/usr/lib/python3.12/dist-packages"
+            "/usr/local/share/boost"
+          )
+          
+          echo "▂▂▂▂▂▂▂▂ 存储基线 ▂▂▂▂▂▂▂▂"
+          for dir in "${scan_dirs[@]}"; do
+            if [ -d "$dir" ]; then
+              sudo du -sh "$dir" | awk '{printf "%-40s ➔ %8s\n", $2, $1}'
+            else
+              echo "::warning::$dir 不存在"
+            fi
+          done
+          echo "▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃▃"
+
+      - name: 智能清理引擎
         run: |
-          echo "▂▂▂▂▂▂▂▂ PIP 占用TOP10 ▂▂▂▂▂▂▂▂"
-          pip list --format=freeze | 
-            cut -d= -f1 | 
-            xargs -n1 pip show 2>/dev/null | 
-            awk '/Name:/ {name=$2} /Location:/ {print name, $2}' | 
-            xargs -I{} sh -c 'du -sh {}/ | sed "s/\/$//"' | 
-            sort -hr | 
-            head -10
-      - name: 存储诊断报告
+          echo "▂▂▂▂▂▂▂▂ 执行清理 ▂▂▂▂▂▂▂▂"
+          
+          # APT专项清理(网页1][6)
+          echo "→ 清理APT缓存及大体积包..."
+          sudo apt-get autoremove -y --purge \
+            'azure-*' \
+            'google-cloud-*' \
+            'temurin-*-jdk' \
+            'llvm-*-dev'
+          sudo apt-get clean
+          
+          # 工具链版本控制(网页3][8)
+          echo "→ 保留最近3个Node版本..."
+          ls /opt/hostedtoolcache/node | sort -Vr | tail -n +4 | while read ver; do
+            echo "清理Node $ver"
+            sudo rm -rf "/opt/hostedtoolcache/node/$ver"
+          done
+          
+          echo "→ 保留最近2个Python版本..."
+          ls /opt/hostedtoolcache/Python | sort -Vr | tail -n +3 | while read ver; do
+            echo "清理Python $ver"
+            sudo rm -rf "/opt/hostedtoolcache/Python/$ver"
+          done
+
+          # Python环境清理(网页9][10)
+          echo "→ 清理Python缓存及SDK..."
+          pip cache purge
+          sudo find /usr/lib/python3.12/dist-packages -maxdepth 1 -type d $ \
+            -name "azure*" \
+            -o -name "google*" \
+            -o -name "jdk*" \
+            -o -name "llvm*" $ -exec rm -rf {} +
+
+          # 系统级清理(网页2)
+          echo "→ 清理系统残留..."
+          sudo rm -rf \
+            /var/lib/apt/lists/* \
+            /usr/local/share/boost \
+            /tmp/* \
+            ~/.cache/*
+
+      - name: 存储健康报告
+        continue-on-error: true
         run: |
-          echo "▂▂▂▂▂▂▂▂ 存储热力图 ▂▂▂▂▂▂▂▂"
-          sudo du -d 1 -h /usr /opt /var 2>/dev/null | 
-            sort -hr | 
-            awk 'NR<=15 {printf "%-45s ➔ \033[36m%8s\033[0m\n", $2, $1}'
+          echo "▂▂▂▂▂▂▂▂ 清理验证 ▂▂▂▂▂▂▂▂"
+          
+          # 生成诊断报告(网页3][6)
+          sudo du -d 2 -h /usr /opt /var 2>/dev/null | sort -hr | awk '
+            BEGIN {
+              print "\033[1;36m存储路径\t\t占用空间\033[0m"
+              print "════════════════════════════════════════════"
+            }
+            $2 ~ /\/(node|Python|azure|google|jdk|llvm)/ {
+              printf "%-45s ➔ \033[31m%8s\033[0m\n", $2, $1
+              next
+            }
+            NR<=15 {
+              printf "%-45s ➔ \033[32m%8s\033[0m\n", $2, $1
+            }
+            END {
+              print "════════════════════════════════════════════"
+              print "\033[33m红色条目: 已清理残留 | 绿色条目: 当前占用\033[0m"
+            }'
+
+          # 空间释放统计(网页1)
+          echo "▂▂▂▂▂▂▂▂ 容量变化 ▂▂▂▂▂▂▂▂"
+          df -h / | awk 'NR==2 {printf "总空间: %s ➔ 可用空间: %s\n", $2, $4}'
